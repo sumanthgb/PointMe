@@ -155,6 +155,18 @@ def compute_scores_full(
 
     combined = round((science_score * SCIENCE_WEIGHT) + (reg_score * REGULATORY_WEIGHT), 1)
 
+    # Apply direct combined-score penalties for HIGH and CRITICAL flags.
+    # Safety sub-score only penalises the science component; these penalties
+    # ensure severe flags drive the final recommendation regardless of other signals.
+    for flag in flags:
+        if flag.severity == FlagSeverity.CRITICAL:
+            combined -= 15.0  # -15 pts per critical flag
+        elif flag.severity == FlagSeverity.HIGH:
+            combined -= 7.0   # -7 pts per high flag
+        elif flag.severity == FlagSeverity.MEDIUM:
+            combined -= 4.0   # -4 pts per medium flag
+    combined = round(max(0.0, combined), 1)
+
     if combined >= THRESHOLD_GO:
         recommendation = "GO"
     elif combined >= THRESHOLD_CAUTION:

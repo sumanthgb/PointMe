@@ -200,6 +200,81 @@ def cross_reference(
             }
         ))
 
+    # -------------------------------------------------------------------
+    # CHECK 7: Trial terminated due to patient harm / mortality
+    # Logic: any termination citing death, increased mortality, or serious
+    #        adverse cardiovascular events = strongest possible safety signal.
+    #        Does NOT require corroboration — patient deaths are a standalone CRITICAL flag.
+    # -------------------------------------------------------------------
+    MORTALITY_HARM_KEYWORDS = [
+        "mortality", "death", "died", "fatal", "patient deaths",
+        "increased cardiovascular", "serious adverse event",
+        "data safety monitoring board", "unacceptable toxicity", "excess mortality",
+        "cardiovascular event", "increased risk of death",
+    ]
+    for trial in trials.failed_trials:
+        why = (trial.why_stopped or "").lower()
+        if any(kw in why for kw in MORTALITY_HARM_KEYWORDS):
+            flags.append(CrossReferenceFlag(
+                type=FlagType.SAFETY_FLAG,
+                severity=FlagSeverity.CRITICAL,
+                message=(
+                    f"CRITICAL: Trial '{trial.nct_id}' was terminated due to patient harm: "
+                    f"'{trial.why_stopped}'. This is the strongest possible negative safety signal."
+                ),
+                details={
+                    "trial_id": trial.nct_id,
+                    "trial_title": trial.title,
+                    "why_stopped": trial.why_stopped,
+                }
+            ))
+
+    # -------------------------------------------------------------------
+    # CHECK 8: Multiple failed trials — potential target-class failure
+    # Logic: independent of genetic score. ≥3 failures = HIGH (repeated class
+    #        failure). 1-2 failures not already flagged by Check 7 = MEDIUM.
+    # -------------------------------------------------------------------
+    already_flagged_trial_ids = {
+        f.details.get("trial_id") for f in flags
+        if f.details and "trial_id" in f.details
+    }
+    unflagged_failures = [
+        t for t in trials.failed_trials if t.nct_id not in already_flagged_trial_ids
+    ]
+
+    if len(trials.failed_trials) >= 3:
+        flags.append(CrossReferenceFlag(
+            type=FlagType.CONTRADICTION,
+            severity=FlagSeverity.HIGH,
+            message=(
+                f"Repeated target-class failure: {len(trials.failed_trials)} trials "
+                "terminated or withdrawn for this target. When multiple programs fail on "
+                "the same target, the biology — not the drug design — is likely the problem."
+            ),
+            details={
+                "failed_trial_count": len(trials.failed_trials),
+                "failure_reasons": [
+                    t.why_stopped for t in trials.failed_trials if t.why_stopped
+                ][:5],
+            }
+        ))
+    elif unflagged_failures:
+        flags.append(CrossReferenceFlag(
+            type=FlagType.CONTRADICTION,
+            severity=FlagSeverity.MEDIUM,
+            message=(
+                f"{len(trials.failed_trials)} terminated/withdrawn trial(s) found for this target. "
+                f"Reason: '{trials.failed_trials[0].why_stopped or 'not specified'}'. "
+                "Investigate before advancing."
+            ),
+            details={
+                "failed_trial_count": len(trials.failed_trials),
+                "failure_reasons": [
+                    t.why_stopped for t in trials.failed_trials if t.why_stopped
+                ][:3],
+            }
+        ))
+
     # Sort by severity: CRITICAL > HIGH > MEDIUM > LOW
     severity_order = {
         FlagSeverity.CRITICAL: 0,

@@ -20,17 +20,14 @@ OPENTARGETS_URL = "https://api.platform.opentargets.org/api/v4/graphql"
 # ---------------------------------------------------------------------------
 
 ASSOCIATIONS_QUERY = """
-query TargetDiseaseAssociations($target: String!, $disease: String!) {
+query TargetAssociations($target: String!) {
   target(ensemblId: $target) {
     id
     approvedSymbol
     approvedName
     biotype
-    tractability {
-      smallMolecule { topCategory }
-      antibody { topCategory }
-    }
-    associatedDiseases(filter: { name: $disease }, page: { size: 10 }) {
+    tractability { label modality value }
+    associatedDiseases(page: { index: 0, size: 10 }) {
       rows {
         disease { name id }
         score
@@ -137,7 +134,7 @@ def fetch_open_targets(target: str, disease: str) -> OpenTargetsResult:
             # Step 2: fetch associations + tractability
             assoc_resp = client.post(OPENTARGETS_URL, json={
                 "query": ASSOCIATIONS_QUERY,
-                "variables": {"target": ensembl_id, "disease": disease}
+                "variables": {"target": ensembl_id}
             })
             assoc_data = assoc_resp.json().get("data", {}).get("target", {})
 
@@ -155,19 +152,24 @@ def fetch_open_targets(target: str, disease: str) -> OpenTargetsResult:
             if associations:
                 overall_score = max(a.score for a in associations)
 
-            # Parse tractability
-            tractability = assoc_data.get("tractability", {})
-            sm = tractability.get("smallMolecule", {}) or {}
-            ab = tractability.get("antibody", {}) or {}
-            # Score: "Clinical Precedence" > "Discovery Precedence" > "Predicted Tractable"
-            tractability_map = {
-                "Clinical Precedence": 1.0,
-                "Discovery Precedence": 0.7,
-                "Predicted Tractable High Confidence": 0.5,
-                "Predicted Tractable Med-Low Confidence": 0.3,
+            # Parse tractability — v4 API returns list of {label, modality, value}
+            # modality: "SM" = small molecule, "AB" = antibody, "PR" = PROTAC
+            tractability_label_scores = {
+                "Approved Drug":                          1.0,
+                "Advanced Clinical":                      0.8,
+                "Phase 1 Clinical":                       0.6,
+                "Predicted Tractable High Confidence":    0.4,
+                "Predicted Tractable Med-Low Confidence": 0.2,
             }
-            sm_score = tractability_map.get(sm.get("topCategory", ""), 0.0)
-            ab_score = tractability_map.get(ab.get("topCategory", ""), 0.0)
+            sm_score = 0.0
+            ab_score = 0.0
+            for item in (assoc_data.get("tractability") or []):
+                if item.get("value"):
+                    val = tractability_label_scores.get(item.get("label", ""), 0.0)
+                    if item.get("modality") == "SM":
+                        sm_score = max(sm_score, val)
+                    elif item.get("modality") in ("AB", "PR"):
+                        ab_score = max(ab_score, val)
             tractability_score = max(sm_score, ab_score)
 
             # Determine molecule type (biologic if antibody tractability > small mol)

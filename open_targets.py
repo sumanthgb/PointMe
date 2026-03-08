@@ -74,8 +74,8 @@ query Pathways($target: String!) {
 # ---------------------------------------------------------------------------
 
 SEARCH_QUERY = """
-query Search($q: String!) {
-  search(queryString: $q, entityNames: ["target"], page: { index: 0, size: 1 }) {
+query Search($q: String!, $entity: [String!]!) {
+  search(queryString: $q, entityNames: $entity, page: { index: 0, size: 1 }) {
     hits {
       id
       entity
@@ -85,17 +85,50 @@ query Search($q: String!) {
 }
 """
 
+# Fetches the association score for a specific target filtered to a disease name.
+# BFilter is Open Targets' text-search argument on associatedDiseases — we use the
+# canonical OT disease name so the first result is almost always the right one.
+DISEASE_SCORE_QUERY = """
+query DiseaseScore($target: String!, $diseaseFilter: String!) {
+  target(ensemblId: $target) {
+    associatedDiseases(BFilter: $diseaseFilter, page: { index: 0, size: 10 }) {
+      rows {
+        disease { name id }
+        score
+      }
+    }
+  }
+}
+"""
+
+
 def resolve_target_id(gene_symbol: str, client) -> str | None:
     """Convert gene symbol like 'KRAS' to Open Targets Ensembl ID."""
     resp = client.post(OPENTARGETS_URL, json={
         "query": SEARCH_QUERY,
-        "variables": {"q": gene_symbol}
+        "variables": {"q": gene_symbol, "entity": ["target"]}
     })
     data = resp.json()
     hits = data.get("data", {}).get("search", {}).get("hits", [])
     if hits:
         return hits[0]["id"]
     return None
+
+
+def resolve_disease_id(disease_name: str, client) -> tuple[str | None, str | None]:
+    """
+    Convert disease name to Open Targets EFO/MONDO ID and canonical name.
+    Returns (efo_id, canonical_name) or (None, None) on failure.
+    """
+    resp = client.post(OPENTARGETS_URL, json={
+        "query": SEARCH_QUERY,
+        "variables": {"q": disease_name, "entity": ["disease"]}
+    })
+    data = resp.json()
+    hits = data.get("data", {}).get("search", {}).get("hits", [])
+    if hits:
+        return hits[0]["id"], hits[0]["name"]
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -131,16 +164,18 @@ def fetch_open_targets(target: str, disease: str) -> OpenTargetsResult:
                     )
                 )
 
-            # Step 2: fetch associations + tractability
+            # Step 2: resolve disease to EFO ID + canonical name (for disease-specific scoring)
+            disease_efo_id, disease_canonical_name = resolve_disease_id(disease, client)
+
+            # Step 3: fetch associations + tractability
             assoc_resp = client.post(OPENTARGETS_URL, json={
                 "query": ASSOCIATIONS_QUERY,
                 "variables": {"target": ensembl_id}
             })
             assoc_data = assoc_resp.json().get("data", {}).get("target", {})
 
-            # Parse genetic associations
+            # Parse genetic associations (top 10 by score, for context)
             associations = []
-            overall_score = 0.0
             rows = assoc_data.get("associatedDiseases", {}).get("rows", [])
             for row in rows:
                 associations.append(GeneticAssociation(
@@ -149,8 +184,35 @@ def fetch_open_targets(target: str, disease: str) -> OpenTargetsResult:
                     score=row["score"],
                     source="Open Targets"
                 ))
-            if associations:
-                overall_score = max(a.score for a in associations)
+
+            # Compute disease-specific genetic score:
+            # 1. If we resolved the disease EFO ID, search for the exact match via BFilter.
+            #    BFilter narrows the query to associations matching the disease name, then we
+            #    pin to the exact EFO ID so pleiotropy in the BFilter results doesn't mislead.
+            # 2. Fall back to max of top-10 only if disease resolution failed entirely.
+            overall_score = 0.0
+            if disease_efo_id and disease_canonical_name:
+                score_resp = client.post(OPENTARGETS_URL, json={
+                    "query": DISEASE_SCORE_QUERY,
+                    "variables": {
+                        "target": ensembl_id,
+                        "diseaseFilter": disease_canonical_name,
+                    }
+                })
+                score_rows = (
+                    score_resp.json()
+                    .get("data", {}).get("target", {})
+                    .get("associatedDiseases", {}).get("rows", [])
+                )
+                for row in score_rows:
+                    if row["disease"]["id"] == disease_efo_id:
+                        overall_score = row["score"]
+                        break
+                # If queried disease wasn't found at all — score stays 0.0, which is correct:
+                # the target has no genetic association with this specific disease in Open Targets.
+            else:
+                # Disease resolution failed — fall back to global max with caveat
+                overall_score = max((a.score for a in associations), default=0.0)
 
             # Parse tractability — v4 API returns list of {label, modality, value}
             # modality: "SM" = small molecule, "AB" = antibody, "PR" = PROTAC
@@ -175,7 +237,7 @@ def fetch_open_targets(target: str, disease: str) -> OpenTargetsResult:
             # Determine molecule type (biologic if antibody tractability > small mol)
             molecule_type = "biologic" if ab_score > sm_score else "small_molecule"
 
-            # Step 3: fetch known drugs
+            # Step 4: fetch known drugs
             drugs_resp = client.post(OPENTARGETS_URL, json={
                 "query": KNOWN_DRUGS_QUERY,
                 "variables": {"target": ensembl_id}
@@ -190,7 +252,7 @@ def fetch_open_targets(target: str, disease: str) -> OpenTargetsResult:
                     mechanism=row.get("mechanismOfAction") or "Unknown"
                 ))
 
-            # Step 4: fetch pathways
+            # Step 5: fetch pathways
             path_resp = client.post(OPENTARGETS_URL, json={
                 "query": PATHWAYS_QUERY,
                 "variables": {"target": ensembl_id}

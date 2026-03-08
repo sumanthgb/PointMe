@@ -1,0 +1,5 @@
+httpx
+pydantic
+anthropic
+fastapi[standard]
+uvicorn

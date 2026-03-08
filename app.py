@@ -1,0 +1,235 @@
+"""
+app.py — TargetIQ FastAPI Server (no Modal)
+
+Run:
+    pip install -r requirements.txt
+    uvicorn app:app --reload --port 8000
+
+Endpoints:
+    GET  /health    — liveness check
+    GET  /mock      — mock response for frontend dev (no pipeline call)
+    POST /evaluate  — full pipeline: {"target": "KRAS G12C", "disease": "NSCLC"}
+"""
+
+import asyncio
+import json
+import os
+import pathlib
+from concurrent.futures import ThreadPoolExecutor
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from models import (
+    OpenTargetsResult, ClinicalTrialsResult, PubMedResult,
+    UniProtResult, FDADrugsResult, OrangeBookResult, TargetIQResponse,
+)
+from workers.open_targets import fetch_open_targets
+from workers.clinical_trials import fetch_clinical_trials
+from workers.pubmed import fetch_pubmed
+from workers.uniprot import fetch_uniprot
+from workers.fda_drugs import fetch_fda_drugs
+from workers.orange_book import fetch_orange_book
+from engine.regulatory import determine_regulatory_pathway
+from engine.cross_reference import cross_reference
+from engine.scoring import compute_scores_full
+from llm_synthesis import synthesize_with_llm
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
+app = FastAPI(
+    title="TargetIQ API",
+    description="AI-powered drug target evaluation platform",
+    version="0.1.0",
+)
+
+# Allow all origins — needed for Rithika's frontend to call this from localhost
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Thread pool for running blocking httpx calls concurrently
+# 6 workers = 6 threads, all fire at the same time
+_executor = ThreadPoolExecutor(max_workers=6)
+
+
+# ---------------------------------------------------------------------------
+# Request / Response models
+# ---------------------------------------------------------------------------
+
+class EvaluateRequest(BaseModel):
+    target: str
+    disease: str
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _run_in_thread(fn, *args):
+    """Run a blocking function in the thread pool without blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, fn, *args)
+
+
+async def _run_all_workers(target: str, disease: str):
+    """
+    Fire all 6 workers concurrently using asyncio + ThreadPoolExecutor.
+    Each worker makes blocking httpx calls, so we offload them to threads.
+    All 6 run at the same time — total wall time = slowest single worker.
+    """
+    results = await asyncio.gather(
+        _run_in_thread(fetch_open_targets,    target, disease),
+        _run_in_thread(fetch_clinical_trials, target, disease),
+        _run_in_thread(fetch_pubmed,          target, disease),
+        _run_in_thread(fetch_uniprot,         target, disease),
+        _run_in_thread(fetch_fda_drugs,       target, disease),
+        _run_in_thread(fetch_orange_book,     target, disease),
+        return_exceptions=True,  # worker crash → failed result, not 500
+    )
+
+    # If a worker threw an exception, replace with a safe failed default
+    def _safe(result, model_class):
+        if isinstance(result, Exception):
+            from models import WorkerMeta, WorkerStatus
+            return model_class(
+                meta=WorkerMeta(status=WorkerStatus.FAILED, error=str(result))
+            )
+        return result
+
+    ot  = _safe(results[0], OpenTargetsResult)
+    ct  = _safe(results[1], ClinicalTrialsResult)
+    pm  = _safe(results[2], PubMedResult)
+    up  = _safe(results[3], UniProtResult)
+    fda = _safe(results[4], FDADrugsResult)
+    ob  = _safe(results[5], OrangeBookResult)
+
+    return ot, ct, pm, up, fda, ob
+
+
+# ---------------------------------------------------------------------------
+# Pipeline orchestration
+# ---------------------------------------------------------------------------
+
+async def orchestrate(target: str, disease: str) -> dict:
+    """Full TargetIQ pipeline — same logic as before, no Modal required."""
+
+    # STEP 1: All 6 workers in parallel
+    ot, ct, pm, up, fda, ob = await _run_all_workers(target, disease)
+
+    # STEP 2: Regulatory rules engine (fast, pure Python — run inline)
+    reg = determine_regulatory_pathway(
+        target_data=ot,
+        disease=disease,
+        trials=ct,
+        fda_data=fda,
+        orange_book=ob,
+    )
+
+    # STEP 3: Cross-reference engine
+    flags = cross_reference(ot, ct, pm, up, fda, ob)
+
+    # STEP 4: Scoring
+    scores = compute_scores_full(ot, ct, pm, up, fda, ob, reg, flags)
+
+    # STEP 5: Assemble response
+    response = TargetIQResponse(
+        target=target,
+        disease=disease,
+        scores=scores,
+        scientific_evidence={
+            "genetic": {
+                "score": ot.genetic_score,
+                "associations": len(ot.genetic_associations),
+                "top_associations": [a.model_dump() for a in ot.genetic_associations[:5]],
+            },
+            "clinical_trials": {
+                "active": len(ct.active_trials),
+                "completed": len(ct.completed_trials),
+                "failed": len(ct.failed_trials),
+                "success_rate": ct.success_rate,
+                "phases": ct.phases,
+            },
+            "literature": {
+                "total_papers": pm.total_papers,
+                "relevance_score": pm.relevance_score,
+                "key_papers": [p.model_dump() for p in pm.papers[:5]],
+            },
+            "expression": {
+                "primary_tissues": [t.model_dump() for t in up.tissue_expression[:10]],
+                "function_summary": up.function_summary,
+                "subcellular_location": up.subcellular_location,
+            },
+            "tractability": {
+                "score": ot.tractability_score,
+                "molecule_type": ot.molecule_type,
+                "known_drugs_in_pipeline": len(ot.known_drugs),
+            },
+        },
+        regulatory_assessment=reg,
+        flags=flags,
+        data_sources={
+            "open_targets":   {"status": ot.meta.status.value,  "query_time_ms": ot.meta.query_time_ms},
+            "clinicaltrials": {"status": ct.meta.status.value,  "query_time_ms": ct.meta.query_time_ms},
+            "pubmed":         {"status": pm.meta.status.value,  "query_time_ms": pm.meta.query_time_ms},
+            "uniprot":        {"status": up.meta.status.value,  "query_time_ms": up.meta.query_time_ms},
+            "fda_drugs":      {"status": fda.meta.status.value, "query_time_ms": fda.meta.query_time_ms},
+            "orange_book":    {"status": ob.meta.status.value,  "query_time_ms": ob.meta.query_time_ms},
+        }
+    )
+
+    # STEP 6: LLM synthesis (also blocking — run in thread)
+    try:
+        response.llm_synthesis = await _run_in_thread(synthesize_with_llm, response)
+    except Exception as e:
+        response.llm_synthesis = f"LLM synthesis failed: {str(e)}"
+
+    return response.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/health", response_model=HealthResponse)
+async def health():
+    return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/mock")
+async def mock_response():
+    """Returns mock JSON for frontend dev — no pipeline call."""
+    mock_path = pathlib.Path(__file__).parent / "mock_response.json"
+    if mock_path.exists():
+        return json.loads(mock_path.read_text())
+    raise HTTPException(status_code=404, detail="mock_response.json not found")
+
+
+@app.post("/evaluate")
+async def evaluate(req: EvaluateRequest):
+    """
+    Full pipeline evaluation.
+
+    Example:
+        POST /evaluate
+        {"target": "KRAS G12C", "disease": "non-small cell lung cancer"}
+    """
+    if not req.target.strip() or not req.disease.strip():
+        raise HTTPException(status_code=400, detail="target and disease are required")
+
+    try:
+        result = await orchestrate(req.target, req.disease)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

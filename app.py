@@ -1,8 +1,9 @@
 """
-app.py — TargetIQ FastAPI Server (no Modal)
+app.py — TargetIQ FastAPI Server
 
 Run:
     pip install -r requirements.txt
+    export ANTHROPIC_API_KEY='sk-ant-...'
     uvicorn app:app --reload --port 8000
 
 Endpoints:
@@ -13,7 +14,6 @@ Endpoints:
 
 import asyncio
 import json
-import os
 import pathlib
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,15 +25,17 @@ from models import (
     OpenTargetsResult, ClinicalTrialsResult, PubMedResult,
     UniProtResult, FDADrugsResult, OrangeBookResult, TargetIQResponse,
 )
-from workers.open_targets import fetch_open_targets
-from workers.clinical_trials import fetch_clinical_trials
-from workers.pubmed import fetch_pubmed
-from workers.uniprot import fetch_uniprot
-from workers.fda_drugs import fetch_fda_drugs
-from workers.orange_book import fetch_orange_book
-from engine.regulatory import determine_regulatory_pathway
-from engine.cross_reference import cross_reference
-from engine.scoring import compute_scores_full
+
+# Flat imports — all files live in the same directory
+from open_targets import fetch_open_targets
+from clinical_trials import fetch_clinical_trials
+from pubmed import fetch_pubmed
+from uniprot import fetch_uniprot
+from fda_drugs import fetch_fda_drugs
+from orange_book import fetch_orange_book
+from regulatory import determine_regulatory_pathway
+from cross_reference import cross_reference
+from scoring import compute_scores_full
 from llm_synthesis import synthesize_with_llm
 
 # ---------------------------------------------------------------------------
@@ -46,7 +48,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Allow all origins — needed for Rithika's frontend to call this from localhost
+# Allow all origins — needed for frontend to call this from any host
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -54,8 +56,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Thread pool for running blocking httpx calls concurrently
-# 6 workers = 6 threads, all fire at the same time
+# Thread pool: 6 workers fire simultaneously
 _executor = ThreadPoolExecutor(max_workers=6)
 
 
@@ -84,11 +85,7 @@ async def _run_in_thread(fn, *args):
 
 
 async def _run_all_workers(target: str, disease: str):
-    """
-    Fire all 6 workers concurrently using asyncio + ThreadPoolExecutor.
-    Each worker makes blocking httpx calls, so we offload them to threads.
-    All 6 run at the same time — total wall time = slowest single worker.
-    """
+    """Fire all 6 workers concurrently. Total wall time = slowest single worker."""
     results = await asyncio.gather(
         _run_in_thread(fetch_open_targets,    target, disease),
         _run_in_thread(fetch_clinical_trials, target, disease),
@@ -96,10 +93,9 @@ async def _run_all_workers(target: str, disease: str):
         _run_in_thread(fetch_uniprot,         target, disease),
         _run_in_thread(fetch_fda_drugs,       target, disease),
         _run_in_thread(fetch_orange_book,     target, disease),
-        return_exceptions=True,  # worker crash → failed result, not 500
+        return_exceptions=True,
     )
 
-    # If a worker threw an exception, replace with a safe failed default
     def _safe(result, model_class):
         if isinstance(result, Exception):
             from models import WorkerMeta, WorkerStatus
@@ -123,12 +119,12 @@ async def _run_all_workers(target: str, disease: str):
 # ---------------------------------------------------------------------------
 
 async def orchestrate(target: str, disease: str) -> dict:
-    """Full TargetIQ pipeline — same logic as before, no Modal required."""
+    """Full TargetIQ pipeline."""
 
     # STEP 1: All 6 workers in parallel
     ot, ct, pm, up, fda, ob = await _run_all_workers(target, disease)
 
-    # STEP 2: Regulatory rules engine (fast, pure Python — run inline)
+    # STEP 2: Regulatory rules engine
     reg = determine_regulatory_pathway(
         target_data=ot,
         disease=disease,
@@ -189,7 +185,7 @@ async def orchestrate(target: str, disease: str) -> dict:
         }
     )
 
-    # STEP 6: LLM synthesis (also blocking — run in thread)
+    # STEP 6: LLM synthesis
     try:
         response.llm_synthesis = await _run_in_thread(synthesize_with_llm, response)
     except Exception as e:

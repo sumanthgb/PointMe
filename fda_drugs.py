@@ -3,20 +3,14 @@ workers/fda_drugs.py — Worker 5: Drugs@FDA via openFDA API
 
 API: https://api.fda.gov/drug/drugsfda.json
 Fetches approved and rejected drugs by active ingredient or pharmacologic class.
-Note: openFDA requires fuzzy matching strategies — drug names vary widely.
 """
 
 import time
-# httpx imported lazily inside functions (avoids import errors in test environments)
 from models import FDADrugsResult, FDADrug, WorkerMeta, WorkerStatus
 
 BASE_URL = "https://api.fda.gov/drug/drugsfda.json"
 
-# Application types that indicate a biologic (→ BLA pathway)
-BIOLOGIC_APP_TYPES = {"BLA"}
-
-# Approval types
-APPROVED_ACTIONS = {"AP", "TA"}  # Approved, Tentative Approval
+APPROVED_ACTIONS = {"AP", "TA"}       # Approved, Tentative Approval
 REJECTED_ACTIONS = {"RTF", "REF", "WD"}  # Refuse to File, Refuse, Withdrawn
 
 
@@ -31,8 +25,8 @@ def _parse_drug(product: dict, submission: dict) -> FDADrug:
         application_type=submission.get("application_type", ""),
         application_number=product.get("application_number"),
         pathway=_infer_pathway(submission),
-        sponsor=None,  # not available in this endpoint
-        mechanism_of_action=None,  # requires separate lookup
+        sponsor=None,
+        mechanism_of_action=None,
     )
 
 
@@ -54,41 +48,31 @@ def fetch_fda_drugs(target: str, disease: str) -> FDADrugsResult:
     """
     Search Drugs@FDA for approved/rejected drugs related to this target.
 
-    Strategy:
-    1. Search by active ingredient name matching the target gene/protein
-    2. Search by brand name if step 1 returns nothing
-    3. Flag drugs with same mechanism of action
-
     Args:
         target:  Gene/protein name, e.g. "KRAS G12C"
-        disease: Disease name (used to cross-check indications)
+        disease: Disease name (context only)
 
     Returns:
         FDADrugsResult with approved and rejected drug lists.
     """
     start = time.time()
-
-    # Normalise target name for search
-    search_term = target.split()[0].lower()  # e.g. "KRAS G12C" → "kras"
+    search_term = target.split()[0].lower()
 
     try:
         import httpx
         with httpx.Client(timeout=30) as client:
 
-            # Search by active ingredient
             resp = client.get(BASE_URL, params={
                 "search": f'products.active_ingredients.name:"{search_term}"',
                 "limit": 50,
             })
 
-            # If 404 (no results), try a broader search
             if resp.status_code == 404:
                 resp = client.get(BASE_URL, params={
                     "search": f'products.brand_name:"{search_term}"',
                     "limit": 50,
                 })
 
-            # Still nothing? Return partial result
             if resp.status_code == 404:
                 return FDADrugsResult(
                     meta=WorkerMeta(
@@ -122,10 +106,13 @@ def fetch_fda_drugs(target: str, disease: str) -> FDADrugsResult:
                 deduped_approved.append(d)
                 seen.add(d.name)
 
-        # For "same MOA" — we'd need a mechanism of action lookup
-        # For now, all returned drugs are treated as potential same-MOA candidates
-        # Aparna can refine this with her regulatory knowledge
-        approved_drugs_same_moa = deduped_approved[:5]  # top 5 as candidates
+        # FIX: approved_drugs_same_moa was incorrectly set to deduped_approved[:5],
+        # which would wrongly trigger 505(b)(2) pathway for any target that has
+        # *any* approved drug, regardless of mechanism. The openFDA endpoint does
+        # not return mechanism-of-action data, so we cannot determine same-MOA here.
+        # Setting to [] correctly defaults the regulatory engine to 505(b)(1).
+        # Aparna can populate this with manual MOA lookups if needed for the demo.
+        approved_drugs_same_moa = []
 
         elapsed = int((time.time() - start) * 1000)
         return FDADrugsResult(

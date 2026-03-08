@@ -20,16 +20,15 @@ EXPRESSION_LEVEL_MAP = {
     "Not detected": 0.0,
 }
 
-# Fields to request from UniProt
+# Fields to request from UniProt (v2 REST API field names)
 FIELDS = ",".join([
     "accession",
     "gene_names",
     "protein_name",
-    "function",
-    "subcellular_location",
-    "tissue_specificity",
-    "disease_comments",
-    "organism",
+    "cc_function",
+    "cc_subcellular_location",
+    "cc_tissue_specificity",
+    "cc_disease",
 ])
 
 
@@ -101,7 +100,7 @@ def fetch_uniprot(target: str, disease: str) -> UniProtResult:
         import httpx
         with httpx.Client(timeout=30) as client:
             resp = client.get(BASE_URL, params={
-                "query": f"gene:{gene_name} AND organism_id:9606",  # 9606 = Homo sapiens
+                "query": f"gene:{gene_name} AND organism_id:9606 AND reviewed:true",  # reviewed:true = Swiss-Prot canonical entry
                 "format": "json",
                 "fields": FIELDS,
                 "size": 1,  # take the top canonical human entry

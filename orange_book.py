@@ -1,29 +1,18 @@
 """
 workers/orange_book.py — Worker 6: FDA Orange Book
 
-Source: https://open.fda.gov/apis/drug/nda/ 
+Source: https://api.fda.gov/drug/drugsfda.json
         + https://www.fda.gov/media/76860/download (downloadable dataset)
 
 Patent and exclusivity data for comparable drugs.
 Used by the scoring engine to assess IP crowding / freedom to operate.
-
-Note: The openFDA NDA endpoint is limited. For best results, supplement with
-the downloadable Orange Book dataset (products.zip, patent.zip, exclusivity.zip).
-This stub implements the API approach; the download approach is noted as an upgrade.
 """
 
 import time
-# httpx imported lazily inside functions (avoids import errors in test environments)
 from models import OrangeBookResult, ComparableDrug, WorkerMeta, WorkerStatus
 
-# openFDA NDA search endpoint
-NDA_URL = "https://api.fda.gov/drug/nda.json"
-
-# Alternatively, use the Orange Book data files directly:
-# https://www.fda.gov/media/76860/download  (products)
-# https://www.fda.gov/media/76862/download  (patent)
-# https://www.fda.gov/media/76861/download  (exclusivity)
-# These are tab-separated .txt files — more reliable, but require a download step
+# FIX: was nda.json which does not exist — correct endpoint is drugsfda.json
+BASE_URL = "https://api.fda.gov/drug/drugsfda.json"
 
 
 def _compute_ip_crowding_score(drugs: list[ComparableDrug]) -> float:
@@ -68,14 +57,13 @@ def fetch_orange_book(target: str, disease: str) -> OrangeBookResult:
     try:
         import httpx
         with httpx.Client(timeout=30) as client:
-            resp = client.get(NDA_URL, params={
+            resp = client.get(BASE_URL, params={
                 "search": f'products.active_ingredients.name:"{search_term}"',
                 "limit": 20,
             })
 
             if resp.status_code == 404:
-                # Try by brand name
-                resp = client.get(NDA_URL, params={
+                resp = client.get(BASE_URL, params={
                     "search": f'products.brand_name:"{search_term}"',
                     "limit": 20,
                 })
@@ -98,15 +86,12 @@ def fetch_orange_book(target: str, disease: str) -> OrangeBookResult:
                 active_ingredients = product.get("active_ingredients", [{}])
                 name = active_ingredients[0].get("name", "Unknown") if active_ingredients else "Unknown"
 
-                # Patent and exclusivity data lives in nested fields
-                # The openFDA NDA endpoint has limited patent data vs the downloadable dataset
-                # These fields may be empty — handled gracefully by the model
                 comparable_drugs.append(ComparableDrug(
                     name=name,
-                    exclusivity_type=product.get("te_code"),       # Therapeutic Equivalence code
-                    exclusivity_expiration=None,                    # Not in NDA endpoint; use download
-                    patent_number=None,                             # Not in NDA endpoint; use download
-                    patent_expiration=None,                         # Not in NDA endpoint; use download
+                    exclusivity_type=product.get("te_code"),
+                    exclusivity_expiration=None,  # not in drugsfda endpoint; use download for this
+                    patent_number=None,
+                    patent_expiration=None,
                 ))
 
         # Deduplicate
@@ -135,16 +120,15 @@ def fetch_orange_book(target: str, disease: str) -> OrangeBookResult:
             )
         )
 
+
 # ---------------------------------------------------------------------------
-# UPGRADE PATH: Download-based Orange Book (more reliable)
+# UPGRADE PATH: Download-based Orange Book (more reliable for patent/exclusivity)
 # ---------------------------------------------------------------------------
-# If the API approach proves too limited, use this instead:
+# If you need real exclusivity expiration dates, use the flat files:
 #
 # import urllib.request, zipfile, io, csv
 #
 # def fetch_orange_book_from_download(target: str) -> OrangeBookResult:
-#     """Download and parse the Orange Book flat files directly from FDA."""
-#     # Products file
 #     url = "https://www.fda.gov/media/76860/download"
 #     with urllib.request.urlopen(url) as r:
 #         zf = zipfile.ZipFile(io.BytesIO(r.read()))

@@ -123,3 +123,87 @@ def fetch_clinical_trials(target: str, disease: str) -> ClinicalTrialsResult:
                 error=str(e)
             )
         )
+
+
+def supplement_with_drug_names(
+    ct_result: ClinicalTrialsResult,
+    drug_names: list[str],
+    disease: str,
+) -> ClinicalTrialsResult:
+    """
+    Supplement an existing ClinicalTrialsResult by also searching each known drug name.
+
+    Many targets (e.g. BACE1, CETP) have trials filed under drug trade/generic names
+    rather than the gene symbol, so a gene-based search misses them entirely.
+    This function deduplicates by NCT ID and recomputes the success rate.
+
+    Args:
+        ct_result:   Existing result from fetch_clinical_trials (gene-name search).
+        drug_names:  Drug names to additionally search (from Open Targets knownDrugs).
+        disease:     Disease string (same as the original query).
+
+    Returns:
+        Merged ClinicalTrialsResult with deduped trials and recomputed success_rate.
+    """
+    if not drug_names or ct_result.meta.status == WorkerStatus.FAILED:
+        return ct_result
+
+    import httpx
+
+    seen_ids: set[str] = {t.nct_id for t in (
+        ct_result.active_trials + ct_result.completed_trials + ct_result.failed_trials
+    )}
+
+    active_extra:    list[Trial] = []
+    completed_extra: list[Trial] = []
+    failed_extra:    list[Trial] = []
+    phase_counts = dict(ct_result.phases)
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            for drug in drug_names[:10]:  # cap to avoid too many requests
+                resp = client.get(BASE_URL, params={
+                    "query.cond": disease,
+                    "query.intr": drug,
+                    "pageSize": 20,
+                    "format": "json",
+                    "fields": (
+                        "NCTId,BriefTitle,OverallStatus,WhyStopped,"
+                        "Phase,EnrollmentCount,StartDate,PrimaryOutcomeMeasure"
+                    ),
+                })
+                if resp.status_code != 200:
+                    continue
+                for study in resp.json().get("studies", []):
+                    trial = _parse_trial(study)
+                    if trial.nct_id in seen_ids:
+                        continue
+                    seen_ids.add(trial.nct_id)
+                    status_upper = trial.status.upper()
+                    if status_upper in FAILED_STATUSES:
+                        failed_extra.append(trial)
+                    elif status_upper in COMPLETED_STATUSES:
+                        completed_extra.append(trial)
+                    elif status_upper in ACTIVE_STATUSES:
+                        active_extra.append(trial)
+                    if trial.phase:
+                        phase_counts[trial.phase] = phase_counts.get(trial.phase, 0) + 1
+    except Exception:
+        # Supplementary step — silently ignore failures, return what we have
+        pass
+
+    merged_active    = ct_result.active_trials    + active_extra
+    merged_completed = ct_result.completed_trials + completed_extra
+    merged_failed    = ct_result.failed_trials    + failed_extra
+
+    total_resolved = len(merged_completed) + len(merged_failed)
+    success_rate = len(merged_completed) / total_resolved if total_resolved > 0 else 0.0
+
+    return ClinicalTrialsResult(
+        active_trials=merged_active,
+        completed_trials=merged_completed,
+        failed_trials=merged_failed,
+        phases=phase_counts,
+        success_rate=success_rate,
+        meta=ct_result.meta,
+    )

@@ -31,7 +31,7 @@ from models import (
 
 # Flat imports — all files live in the same directory
 from open_targets import fetch_open_targets
-from clinical_trials import fetch_clinical_trials
+from clinical_trials import fetch_clinical_trials, supplement_with_drug_names
 from pubmed import fetch_pubmed
 from uniprot import fetch_uniprot
 from fda_drugs import fetch_fda_drugs
@@ -126,6 +126,12 @@ async def orchestrate(target: str, disease: str) -> dict:
 
     # STEP 1: All 6 workers in parallel
     ot, ct, pm, up, fda, ob = await _run_all_workers(target, disease)
+
+    # STEP 1b: Supplement ClinicalTrials with drug-name searches from Open Targets.
+    # Gene-name searches miss trials filed under drug trade names (e.g. BACE1 → verubecestat).
+    if ot.known_drugs:
+        drug_names = [d.drug_name for d in ot.known_drugs]
+        ct = await _run_in_thread(supplement_with_drug_names, ct, drug_names, disease)
 
     # STEP 2: Regulatory rules engine
     reg = determine_regulatory_pathway(

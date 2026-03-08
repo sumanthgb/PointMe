@@ -39,7 +39,7 @@ class GeneticAssociation(BaseModel):
 
 class KnownDrug(BaseModel):
     drug_name: str
-    phase: int
+    phase: float  # API can return fractional phases (e.g. 0.5 for Phase 1/2)
     status: str   # e.g. "Approved", "Phase 3", "Withdrawn"
     mechanism: str
 

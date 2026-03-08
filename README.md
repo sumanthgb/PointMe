@@ -159,4 +159,8 @@ All 6 data sources are free public APIs — no keys needed.
 }
 ```
 
+<<<<<<< HEAD
 See `mock_response.json` for a full worked example with KRAS G12C / NSCLC.
+=======
+See `mock_response.json` for a full worked example with KRAS G12C / NSCLC.
+>>>>>>> e962d3c (Edits to App.py, FDA Drugs, Orange Book, and README)

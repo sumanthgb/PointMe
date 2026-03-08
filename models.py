@@ -192,11 +192,21 @@ class CrossReferenceFlag(BaseModel):
     details: Optional[dict] = None
 
 
+class ScoreConfidence(BaseModel):
+    recommendation_stability: float    # P(same recommendation under noise), 0-1
+    combined_score_ci_low: float       # 2.5th percentile of MC combined score distribution
+    combined_score_ci_high: float      # 97.5th percentile
+    success_rate_ci_low: float         # bootstrap 2.5th percentile on trial success rate
+    success_rate_ci_high: float        # bootstrap 97.5th percentile
+    n_trials_observed: int             # completed + failed trials (bootstrap sample size)
+
+
 class Scores(BaseModel):
     science_score: float       # 0-100
     regulatory_score: float    # 0-100
     combined_score: float      # 0-100
     recommendation: str        # "GO" | "CAUTION" | "NO-GO"
+    confidence: Optional[ScoreConfidence] = None  # None only if numpy is unavailable
 
 
 # ---------------------------------------------------------------------------

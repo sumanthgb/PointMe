@@ -20,6 +20,8 @@ from config import (
     SAFETY_ORGANS, EXPRESSION_SAFETY_THRESHOLD,
     PATHWAY_COMPLEXITY, DESIGNATION_SCORES,
 )
+# Imported here to keep confidence logic separate; lazy-safe (numpy inside)
+from confidence import compute_confidence
 
 
 # ---------------------------------------------------------------------------
@@ -174,9 +176,29 @@ def compute_scores_full(
     else:
         recommendation = "NO-GO"
 
+    # Confidence metrics: bootstrap CI on trial success rate + MC score stability.
+    # These are informational — a failure here never blocks the main result.
+    confidence = None
+    try:
+        confidence = compute_confidence(
+            genetic_score=open_targets.genetic_score,
+            tractability_score=open_targets.tractability_score,
+            success_rate=trials.success_rate,
+            relevance_score=pubmed.relevance_score,
+            safety_score=safety,
+            regulatory_score_100=reg_score,
+            flags=flags,
+            completed_trials=len(trials.completed_trials),
+            failed_trials=len(trials.failed_trials),
+            base_recommendation=recommendation,
+        )
+    except Exception:
+        pass  # numpy unavailable or unexpected error — degrade gracefully
+
     return Scores(
         science_score=science_score,
         regulatory_score=reg_score,
         combined_score=combined,
         recommendation=recommendation,
+        confidence=confidence,
     )

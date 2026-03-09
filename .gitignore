@@ -4,3 +4,11 @@ __pycache__/
 *.pyd
 .env
 .env.*
+
+# frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# planning docs — not for repo
+aim_full_chat_transcript.md
+compl_ai_overview.docx

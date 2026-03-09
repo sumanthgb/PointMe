@@ -4,3 +4,4 @@ anthropic
 fastapi[standard]
 uvicorn
 python-dotenv
+numpy

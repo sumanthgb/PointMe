@@ -39,6 +39,8 @@ from orange_book import fetch_orange_book
 from regulatory import determine_regulatory_pathway
 from cross_reference import cross_reference
 from scoring import compute_scores_full
+from cost_model import estimate_development_cost
+from patent_radar import fetch_patent_radar
 from llm_synthesis import synthesize_with_llm
 
 # ---------------------------------------------------------------------------
@@ -148,6 +150,23 @@ async def orchestrate(target: str, disease: str) -> dict:
     # STEP 4: Scoring
     scores = compute_scores_full(ot, ct, pm, up, fda, ob, reg, flags)
 
+    # STEP 4b: Development cost & timeline estimate (Monte Carlo triangular, ~15ms)
+    cost_estimate = None
+    try:
+        cost_estimate = estimate_development_cost(reg, ct, flags)
+    except Exception:
+        pass  # numpy unavailable or unexpected error — degrade gracefully
+
+    # STEP 4c: Patent landscape scan (USPTO PatentsView API + LLM assessment)
+    patent_radar = None
+    try:
+        known_drug_names = [d.drug_name for d in ot.known_drugs] if ot.known_drugs else []
+        patent_radar = await _run_in_thread(
+            fetch_patent_radar, target, disease, known_drug_names
+        )
+    except Exception:
+        pass  # degrade gracefully — patent scan is informational, not blocking
+
     # STEP 5: Assemble response
     response = TargetIQResponse(
         target=target,
@@ -184,6 +203,8 @@ async def orchestrate(target: str, disease: str) -> dict:
         },
         regulatory_assessment=reg,
         flags=flags,
+        cost_estimate=cost_estimate,
+        patent_radar=patent_radar,
         data_sources={
             "open_targets":   {"status": ot.meta.status.value,  "query_time_ms": ot.meta.query_time_ms},
             "clinicaltrials": {"status": ct.meta.status.value,  "query_time_ms": ct.meta.query_time_ms},

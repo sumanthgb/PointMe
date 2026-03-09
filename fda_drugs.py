@@ -44,51 +44,98 @@ def _infer_pathway(submission: dict) -> str:
     return "Standard"
 
 
+def _search_fda(client, search_query: str, limit: int = 50) -> list:
+    """Run a single openFDA drugsfda query, return results list or []."""
+    resp = client.get(BASE_URL, params={"search": search_query, "limit": limit})
+    if resp.status_code == 200:
+        return resp.json().get("results", [])
+    return []
+
+
 def fetch_fda_drugs(target: str, disease: str) -> FDADrugsResult:
     """
     Search Drugs@FDA for approved/rejected drugs related to this target.
 
     Args:
         target:  Gene/protein name, e.g. "KRAS G12C"
-        disease: Disease name (context only)
+        disease: Disease name
 
     Returns:
         FDADrugsResult with approved and rejected drug lists.
     """
     start = time.time()
     search_term = target.split()[0].lower()
+    # Shorten disease to first 2-3 words to improve FDA search hit rate
+    disease_term = " ".join(disease.split()[:3]).lower()
 
     try:
         import httpx
         with httpx.Client(timeout=30) as client:
+            # Query 1: by active ingredient (works for targets that ARE drugs, e.g. PCSK9 → evolocumab)
+            results = _search_fda(client, f'products.active_ingredients.name:"{search_term}"')
 
-            resp = client.get(BASE_URL, params={
-                "search": f'products.active_ingredients.name:"{search_term}"',
-                "limit": 50,
-            })
+            # Query 2: by brand name fallback
+            if not results:
+                results = _search_fda(client, f'products.brand_name:"{search_term}"')
 
-            if resp.status_code == 404:
-                resp = client.get(BASE_URL, params={
-                    "search": f'products.brand_name:"{search_term}"',
-                    "limit": 50,
-                })
+            # Query 3: by indication/disease — finds approved drugs IN the same disease space
+            # (critical for targets like BACE1 where no drug is named "bace1" but
+            #  lecanemab/donanemab are approved for Alzheimer's disease)
+            disease_results = _search_fda(
+                client,
+                f'products.active_ingredients.name:"{disease_term}"',
+                limit=20
+            )
+            # Use openfda label indication search as disease fallback
+            if not disease_results:
+                label_resp = client.get(
+                    "https://api.fda.gov/drug/label.json",
+                    params={
+                        "search": f'indications_and_usage:"{disease_term}"',
+                        "limit": 10,
+                    }
+                )
+                if label_resp.status_code == 200:
+                    for item in label_resp.json().get("results", []):
+                        openfda = item.get("openfda", {})
+                        brand_names = openfda.get("brand_name", [])
+                        app_numbers = openfda.get("application_number", [])
+                        for i, brand in enumerate(brand_names[:3]):
+                            app_num = app_numbers[i] if i < len(app_numbers) else None
+                            results.append({
+                                "_from_label": True,
+                                "brand_name": brand,
+                                "application_number": app_num,
+                            })
 
-            if resp.status_code == 404:
+            if not results:
                 return FDADrugsResult(
                     meta=WorkerMeta(
                         status=WorkerStatus.PARTIAL,
                         query_time_ms=int((time.time() - start) * 1000),
-                        error=f"No FDA drug records found for '{search_term}'"
+                        error=f"No FDA drug records found for '{search_term}' or '{disease_term}'"
                     )
                 )
 
-            resp.raise_for_status()
-            data = resp.json()
+            data = {"results": results}
 
         approved_drugs = []
         rejected_drugs = []
 
         for result in data.get("results", []):
+            # Handle label-sourced entries (disease fallback)
+            if result.get("_from_label"):
+                approved_drugs.append(FDADrug(
+                    name=result.get("brand_name", "Unknown"),
+                    approval_date=None,
+                    application_type="NDA/BLA",
+                    application_number=result.get("application_number"),
+                    pathway="Standard",
+                    sponsor=None,
+                    mechanism_of_action=None,
+                ))
+                continue
+
             for submission in result.get("submissions", []):
                 action = submission.get("submission_status", "").upper()
                 for product in result.get("products", []):

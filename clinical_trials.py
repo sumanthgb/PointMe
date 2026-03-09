@@ -65,11 +65,6 @@ def fetch_clinical_trials(target: str, disease: str) -> ClinicalTrialsResult:
             "query.intr": target,
             "pageSize": CLINICALTRIALS_MAX_RESULTS,
             "format": "json",
-            # Return only the fields we care about
-            "fields": (
-                "NCTId,BriefTitle,OverallStatus,WhyStopped,"
-                "Phase,EnrollmentCount,StartDate,PrimaryOutcomeMeasure"
-            ),
         }
 
         import httpx
@@ -167,10 +162,6 @@ def supplement_with_drug_names(
                     "query.intr": drug,
                     "pageSize": 20,
                     "format": "json",
-                    "fields": (
-                        "NCTId,BriefTitle,OverallStatus,WhyStopped,"
-                        "Phase,EnrollmentCount,StartDate,PrimaryOutcomeMeasure"
-                    ),
                 })
                 if resp.status_code != 200:
                     continue

@@ -348,8 +348,16 @@
   <div class="card error-card fade-up">
     <div class="error-title">Evaluation failed</div>
     <div class="error-msg" id="error-msg"></div>
-    <div class="error-hint" id="error-hint">Connecting to https://pointme-api.onrender.com</div>
-    <button class="btn-primary" onclick="resetApp()">Try Again</button>
+    <div class="error-hint" id="error-hint"></div>
+    <div id="wake-hint" style="display:none;margin-bottom:12px;font-size:11px;color:var(--caution);background:var(--caution-light);border:1px solid #f5d98a;border-radius:6px;padding:8px 10px;line-height:1.6">
+      The backend server appears to be asleep (Render free tier spins down after 15 min of inactivity).
+      Click <strong>Wake Server</strong> below, wait ~30 seconds for it to start, then try again.
+    </div>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      <button class="btn-primary" onclick="resetApp()">Try Again</button>
+      <button class="btn-ghost" id="wake-btn" onclick="wakeServer()" style="display:none">Wake Server</button>
+      <button class="btn-ghost" onclick="loadDemo('kras')">Use Demo Data Instead</button>
+    </div>
   </div>
 </div>
 
@@ -467,6 +475,8 @@ function loadDemo(key) {
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────────
+let _lastTarget = '', _lastDisease = '';
+
 async function handleSubmit() {
   const target = document.getElementById('target-input').value.trim();
   const disease = document.getElementById('disease-input').value.trim();
@@ -474,14 +484,22 @@ async function handleSubmit() {
     alert('Please enter both a target and a disease.');
     return;
   }
+  _lastTarget = target;
+  _lastDisease = disease;
   showState('loading');
   startLoadingAnimation(target, disease);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000); // 2 min hard timeout
+
   try {
     const res = await fetch(`${API_BASE}/evaluate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ target, disease }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -489,10 +507,29 @@ async function handleSubmit() {
     const data = await res.json();
     renderResults(data);
   } catch (e) {
-    document.getElementById('error-msg').textContent = e.message;
-    document.getElementById('error-hint').textContent = `Connecting to ${API_BASE}`;
+    clearTimeout(timeout);
+    const isNetworkErr = e.name === 'TypeError' || e.name === 'AbortError';
+    document.getElementById('error-msg').textContent =
+      e.name === 'AbortError' ? 'Request timed out (2 min). The server may be overloaded.' : e.message;
+    document.getElementById('error-hint').textContent =
+      isNetworkErr ? '' : `Server: ${API_BASE}`;
+    document.getElementById('wake-hint').style.display = isNetworkErr ? 'block' : 'none';
+    document.getElementById('wake-btn').style.display = isNetworkErr ? 'inline-flex' : 'none';
     showState('error');
   }
+}
+
+async function wakeServer() {
+  const btn = document.getElementById('wake-btn');
+  btn.textContent = 'Waking…';
+  btn.disabled = true;
+  try {
+    await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(60000) });
+    btn.textContent = '✓ Server awake — click Try Again';
+  } catch {
+    btn.textContent = 'Still offline — try again in 30s';
+  }
+  btn.disabled = false;
 }
 
 // ── Loading animation ─────────────────────────────────────────────────────────

@@ -521,6 +521,13 @@ function startLoadingAnimation(target, disease) {
       <div class="step-label">${s.label}</div>
       <div class="step-time" id="lstep-time-${i}"></div>
     </div>`).join('');
+  // Add a "waiting for server" row after animation completes
+  const waitRow = document.createElement('div');
+  waitRow.id = 'wait-row';
+  waitRow.style.cssText = 'display:none;margin-top:14px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--ink-3);font-family:"JetBrains Mono",monospace;text-align:center';
+  waitRow.innerHTML = '⏳ Server is processing… Render cold starts can take 30–60s. Please wait.';
+  list.parentElement.appendChild(waitRow);
+
   let idx = 0;
   const advance = () => {
     if (idx > 0) {
@@ -533,6 +540,9 @@ function startLoadingAnimation(target, disease) {
       idx++;
       const delay = idx <= 6 ? 900 : 700;
       loadingTimer = setTimeout(advance, delay);
+    } else {
+      // Animation done but API still running — show wait message
+      document.getElementById('wait-row').style.display = 'block';
     }
   };
   advance();
@@ -540,6 +550,14 @@ function startLoadingAnimation(target, disease) {
 
 // ── Render results ────────────────────────────────────────────────────────────
 function renderResults(data) {
+  try { _renderResults(data); } catch(e) {
+    console.error('renderResults error:', e);
+    document.getElementById('error-msg').textContent = 'Render error: ' + e.message;
+    document.getElementById('error-hint').textContent = 'The API returned data but the UI failed to render. Check browser console.';
+    showState('error');
+  }
+}
+function _renderResults(data) {
   clearTimeout(loadingTimer);
   currentData = data;
   const s = data.scores;

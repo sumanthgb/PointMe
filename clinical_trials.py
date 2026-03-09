@@ -62,7 +62,7 @@ def fetch_clinical_trials(target: str, disease: str) -> ClinicalTrialsResult:
     try:
         params = {
             "query.cond": disease,
-            "query.intr": target,
+            "query.term": target,  # searches ALL fields (titles, interventions, descriptions)
             "pageSize": CLINICALTRIALS_MAX_RESULTS,
             "format": "json",
         }
@@ -159,7 +159,7 @@ def supplement_with_drug_names(
             for drug in drug_names[:10]:  # cap to avoid too many requests
                 resp = client.get(BASE_URL, params={
                     "query.cond": disease,
-                    "query.intr": drug,
+                    "query.term": drug,
                     "pageSize": 20,
                     "format": "json",
                 })

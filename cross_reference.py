@@ -213,6 +213,11 @@ def cross_reference(
         "cardiovascular event", "increased risk of death",
         "worsening", "worse outcome", "deterioration", "detrimental",
         "harm to participants", "risk to participants",
+        # Organ-specific toxicity endpoints (standalone — don't require UniProt corroboration)
+        "hepatotoxicity", "hepatotox", "liver toxicity", "liver failure", "liver enzyme",
+        "cardiotoxicity", "cardiotox", "cardiac toxicity", "qt prolongation",
+        "nephrotoxicity", "nephrotox", "renal toxicity", "renal failure",
+        "neurotoxicity", "neurotox", "seizure",
     ]
     for trial in trials.failed_trials:
         why = (trial.why_stopped or "").lower()

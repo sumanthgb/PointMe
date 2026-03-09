@@ -14,7 +14,7 @@ import { CostEstimatePanel } from './components/CostEstimatePanel'
 
 type ResultsTab = 'overview' | 'science' | 'regulatory' | 'cost' | 'ip' | 'flags'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'https://pointme-api.onrender.com'
+const API_BASE = import.meta.env.VITE_API_URL ?? 'https://pointme-7273.onrender.com'
 
 async function evaluateTarget(target: string, disease: string): Promise<PointMeResponse> {
   const res = await fetch(`${API_BASE}/evaluate`, {

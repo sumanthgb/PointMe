@@ -29,8 +29,12 @@ SCIENCE_WEIGHT  = 0.50
 REGULATORY_WEIGHT = 0.50
 
 # Recommendation thresholds (combined score 0-100)
-THRESHOLD_GO     = 65
-THRESHOLD_CAUTION = 40
+# CAUTION band was 40-64 — too wide. A score of 40 and 64 have very different outlooks.
+# Tightened: GO ≥ 65 (unchanged), CAUTION ≥ 45, NO-GO < 45.
+# With Phase III failure penalties now reaching -30+ pts, this ensures class-failed
+# targets cannot stay in low-CAUTION when their combined score is correctly suppressed.
+THRESHOLD_GO      = 65
+THRESHOLD_CAUTION = 45
 # Below THRESHOLD_CAUTION → NO-GO
 
 

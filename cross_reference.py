@@ -201,16 +201,18 @@ def cross_reference(
         ))
 
     # -------------------------------------------------------------------
-    # CHECK 7: Trial terminated due to patient harm / mortality
-    # Logic: any termination citing death, increased mortality, or serious
-    #        adverse cardiovascular events = strongest possible safety signal.
-    #        Does NOT require corroboration — patient deaths are a standalone CRITICAL flag.
+    # CHECK 7a: Trial terminated due to patient harm / mortality → CRITICAL
+    # Logic: any termination citing death, increased mortality, worsened patient
+    #        outcomes, or unacceptable adverse events = strongest safety signal.
+    #        "worsening" covers BACE1 verubecestat/EPOCH (cognitive worsening).
     # -------------------------------------------------------------------
     MORTALITY_HARM_KEYWORDS = [
         "mortality", "death", "died", "fatal", "patient deaths",
         "increased cardiovascular", "serious adverse event",
         "data safety monitoring board", "unacceptable toxicity", "excess mortality",
         "cardiovascular event", "increased risk of death",
+        "worsening", "worse outcome", "deterioration", "detrimental",
+        "harm to participants", "risk to participants",
     ]
     for trial in trials.failed_trials:
         why = (trial.why_stopped or "").lower()
@@ -219,8 +221,8 @@ def cross_reference(
                 type=FlagType.SAFETY_FLAG,
                 severity=FlagSeverity.CRITICAL,
                 message=(
-                    f"CRITICAL: Trial '{trial.nct_id}' was terminated due to patient harm: "
-                    f"'{trial.why_stopped}'. This is the strongest possible negative safety signal."
+                    f"CRITICAL: Trial '{trial.nct_id}' was terminated due to patient harm or "
+                    f"worsened outcomes: '{trial.why_stopped}'."
                 ),
                 details={
                     "trial_id": trial.nct_id,
@@ -230,9 +232,73 @@ def cross_reference(
             ))
 
     # -------------------------------------------------------------------
+    # CHECK 7b: Efficacy failure terminations → HIGH (Phase III → CRITICAL)
+    # Logic: "lack of efficacy" / "futility" means the drug was tested and
+    #        found not to work — the target hypothesis failed.
+    #        Phase III efficacy failure is a class-killing event → CRITICAL.
+    #        (Distinct from safety: the drug does nothing, not that it harms.)
+    # BACE1 coverage: verubecestat EPOCH/APECS, lanabecestat, elenbecestat all
+    #        stopped for futility or lack of efficacy.
+    # -------------------------------------------------------------------
+    EFFICACY_FAILURE_KEYWORDS = [
+        "lack of efficacy", "lack efficacy",
+        "futility", "pre-specified futility", "interim futility",
+        "did not meet", "failed to meet", "failure to meet",
+        "no significant", "insufficient efficacy", "no efficacy",
+        "negative results", "negative outcome",
+        "benefit-risk", "unfavorable risk", "risk-benefit",
+    ]
+    _flagged_by_7a = {
+        f.details.get("trial_id") for f in flags
+        if f.details and "trial_id" in f.details
+    }
+    for trial in trials.failed_trials:
+        if trial.nct_id in _flagged_by_7a:
+            continue
+        why = (trial.why_stopped or "").lower()
+        if not any(kw in why for kw in EFFICACY_FAILURE_KEYWORDS):
+            continue
+
+        # Determine phase for severity escalation
+        is_phase3 = trial.phase and ("3" in trial.phase.upper() or "4" in trial.phase.upper())
+
+        if is_phase3:
+            flags.append(CrossReferenceFlag(
+                type=FlagType.CONTRADICTION,
+                severity=FlagSeverity.CRITICAL,
+                message=(
+                    f"CRITICAL: Phase III trial '{trial.nct_id}' terminated for efficacy failure: "
+                    f"'{trial.why_stopped}'. Phase III failure is a class-level event — "
+                    "the target hypothesis was tested at scale and rejected."
+                ),
+                details={
+                    "trial_id": trial.nct_id,
+                    "trial_title": trial.title,
+                    "why_stopped": trial.why_stopped,
+                    "phase": trial.phase,
+                }
+            ))
+        else:
+            flags.append(CrossReferenceFlag(
+                type=FlagType.CONTRADICTION,
+                severity=FlagSeverity.HIGH,
+                message=(
+                    f"Trial '{trial.nct_id}' (phase: {trial.phase or 'unknown'}) terminated for "
+                    f"efficacy failure: '{trial.why_stopped}'. Target hypothesis not supported."
+                ),
+                details={
+                    "trial_id": trial.nct_id,
+                    "trial_title": trial.title,
+                    "why_stopped": trial.why_stopped,
+                    "phase": trial.phase,
+                }
+            ))
+
+    # -------------------------------------------------------------------
     # CHECK 8: Multiple failed trials — potential target-class failure
-    # Logic: independent of genetic score. ≥3 failures = HIGH (repeated class
-    #        failure). 1-2 failures not already flagged by Check 7 = MEDIUM.
+    # Logic: ≥3 total failures = HIGH class-failure signal, escalated to CRITICAL
+    #        if any of those failures were Phase III (biology is the problem).
+    #        1-2 failures not already flagged = MEDIUM.
     # -------------------------------------------------------------------
     already_flagged_trial_ids = {
         f.details.get("trial_id") for f in flags
@@ -243,16 +309,25 @@ def cross_reference(
     ]
 
     if len(trials.failed_trials) >= 3:
+        # Escalate to CRITICAL if any Phase III among the failures
+        has_phase3_failure = any(
+            t.phase and ("3" in t.phase.upper() or "4" in t.phase.upper())
+            for t in trials.failed_trials
+        )
+        check8_severity = FlagSeverity.CRITICAL if has_phase3_failure else FlagSeverity.HIGH
+        phase3_note = " Including Phase III failure(s) — this signals a target-biology problem, not a drug-design problem." if has_phase3_failure else ""
+
         flags.append(CrossReferenceFlag(
             type=FlagType.CONTRADICTION,
-            severity=FlagSeverity.HIGH,
+            severity=check8_severity,
             message=(
                 f"Repeated target-class failure: {len(trials.failed_trials)} trials "
                 "terminated or withdrawn for this target. When multiple programs fail on "
-                "the same target, the biology — not the drug design — is likely the problem."
+                f"the same target, the biology is likely the problem.{phase3_note}"
             ),
             details={
                 "failed_trial_count": len(trials.failed_trials),
+                "has_phase3_failure": has_phase3_failure,
                 "failure_reasons": [
                     t.why_stopped for t in trials.failed_trials if t.why_stopped
                 ][:5],

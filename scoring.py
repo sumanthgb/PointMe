@@ -7,6 +7,7 @@ Final scores are scaled to 0–100.
 """
 
 import math
+from typing import Optional
 from models import (
     Scores, CrossReferenceFlag, FlagSeverity, FlagType,
     OpenTargetsResult, ClinicalTrialsResult, PubMedResult,
@@ -22,6 +23,67 @@ from config import (
 )
 # Imported here to keep confidence logic separate; lazy-safe (numpy inside)
 from confidence import compute_confidence
+
+
+# ---------------------------------------------------------------------------
+# Phase-weighted clinical score
+# ---------------------------------------------------------------------------
+
+def _extract_phase_num(phase_str: Optional[str]) -> Optional[str]:
+    """
+    Extract the highest phase number from a ClinicalTrials.gov phase string.
+    'PHASE3' → '3', 'PHASE1' → '1', 'EARLY_PHASE1' → '1', None → None.
+    Phase 4 treated as Phase 3 (post-approval surveillance, same signal weight).
+    """
+    if not phase_str:
+        return None
+    s = phase_str.upper()
+    if "4" in s or "3" in s:
+        return "3"
+    if "2" in s:
+        return "2"
+    if "1" in s:
+        return "1"
+    return None
+
+
+# Higher phase = higher weight. Phase 3 failures are existential; Phase 1 is routine.
+_PHASE_SUCCESS_WEIGHTS = {"3": 3.0, "2": 1.5, "1": 0.5}
+_PHASE_DEFAULT_WEIGHT  = 1.0
+
+
+def _phase_weighted_clinical_score(trials: ClinicalTrialsResult) -> float:
+    """
+    Phase-weighted clinical success score (0-1).
+
+    The root problem with raw success_rate:
+      - BACE1 has a dozen Phase I dose-escalation completions (expected to succeed)
+        plus 4+ Phase III terminations — raw success_rate ≈ 0.6, misleadingly 'moderate'
+      - Each trial gets equal weight regardless of phase
+
+    This function weights by phase severity so Phase III failures dominate:
+      completed_weight_sum / total_weight_sum
+
+    Example: 6 Phase I completions + 3 Phase III failures
+      raw rate   = 6/9 = 0.67  (looks OK)
+      phase-weighted = (6×0.5) / (6×0.5 + 3×3.0) = 3.0 / 12.0 = 0.25  (correctly severe)
+    """
+    total_weight   = 0.0
+    success_weight = 0.0
+
+    for t in trials.completed_trials:
+        w = _PHASE_SUCCESS_WEIGHTS.get(_extract_phase_num(t.phase), _PHASE_DEFAULT_WEIGHT)
+        total_weight   += w
+        success_weight += w
+
+    for t in trials.failed_trials:
+        w = _PHASE_SUCCESS_WEIGHTS.get(_extract_phase_num(t.phase), _PHASE_DEFAULT_WEIGHT)
+        total_weight += w
+
+    if total_weight == 0:
+        return trials.success_rate  # no phase data — fall back to raw rate
+
+    return round(success_weight / total_weight, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +125,31 @@ def _pathway_score(reg: RegulatoryPathwayResult) -> float:
     return PATHWAY_COMPLEXITY.get(pathway, 0.2)
 
 
-def _designation_score(reg: RegulatoryPathwayResult) -> float:
-    """Score based on special designations earned (additive, capped at 1.0)."""
+def _designation_score(reg: RegulatoryPathwayResult, trials: ClinicalTrialsResult) -> float:
+    """
+    Score based on special designations earned (additive, capped at 1.0).
+
+    Designation inflation fix: Alzheimer's / high-designation diseases can accumulate
+    Fast Track + Breakthrough + Priority Review even when the entire target class has
+    failed Phase III. Designations reflect regulatory opportunity, not scientific merit.
+    Cap at 0.30 when ≥2 Phase III terminations exist — the designations are moot if
+    the biology is broken.
+    """
     score = 0.0
     for desig in reg.special_designations:
         score += DESIGNATION_SCORES.get(desig.value, 0.0)
-    return min(1.0, score)
+    raw = min(1.0, score)
+
+    # Count Phase III failures across all failed trials
+    phase3_failures = sum(
+        1 for t in trials.failed_trials
+        if t.phase and ("3" in t.phase.upper() or "4" in t.phase.upper())
+    )
+    if phase3_failures >= 2:
+        # Cap at 0.30: designations still have some regulatory value but they can't
+        # offset repeated Phase III evidence that the target doesn't work.
+        return min(raw, 0.30)
+    return raw
 
 
 def _competition_score(fda: FDADrugsResult) -> float:
@@ -138,7 +219,7 @@ def compute_scores_full(
     science_components = {
         "genetic_evidence":  (open_targets.genetic_score,      SCIENCE_WEIGHTS["genetic_evidence"]),
         "literature_support": (pubmed.relevance_score,          SCIENCE_WEIGHTS["literature_support"]),
-        "prior_clinical":    (trials.success_rate,              SCIENCE_WEIGHTS["prior_clinical"]),
+        "prior_clinical":    (_phase_weighted_clinical_score(trials), SCIENCE_WEIGHTS["prior_clinical"]),
         "tractability":      (open_targets.tractability_score,  SCIENCE_WEIGHTS["tractability"]),
         "safety_profile":    (safety,                           SCIENCE_WEIGHTS["safety_profile"]),
     }
@@ -147,7 +228,7 @@ def compute_scores_full(
 
     reg_components = {
         "pathway_complexity":    (_pathway_score(reg),          REGULATORY_WEIGHTS["pathway_complexity"]),
-        "special_designations":  (_designation_score(reg),      REGULATORY_WEIGHTS["special_designations"]),
+        "special_designations":  (_designation_score(reg, trials), REGULATORY_WEIGHTS["special_designations"]),
         "competitive_landscape": (_competition_score(fda_data), REGULATORY_WEIGHTS["competitive_landscape"]),
         "precedent_strength":    (_precedent_score(fda_data),   REGULATORY_WEIGHTS["precedent_strength"]),
         "ip_freedom":            (_ip_score(orange_book),       REGULATORY_WEIGHTS["ip_freedom"]),

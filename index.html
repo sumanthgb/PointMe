@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PointMe — Drug Target Validation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --canvas: #F5F3EF;
+    --surface: #FFFFFF;
+    --surface-2: #F0EDE8;
+    --surface-3: #E8E4DE;
+    --border: #D4CFC8;
+    --ink: #1C1C1E;
+    --ink-2: #4A4A4E;
+    --ink-3: #6A6A6E;
+    --ink-4: #9A9A9E;
+    --teal: #0D4F4F;
+    --teal-light: #E8F0F0;
+    --teal-border: #B8D4D4;
+    --go: #2D936C;
+    --go-light: #E8F5EF;
+    --caution: #D4930D;
+    --caution-light: #FEF3E2;
+    --nogo: #C1292E;
+    --nogo-light: #FDECEA;
+    --gold: #B8953E;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--canvas); color: var(--ink); min-height: 100vh; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  /* Nav */
+  nav { border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.85); backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 50; }
+  .nav-inner { max-width: 1100px; margin: 0 auto; padding: 0 20px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+  .nav-logo { display: flex; align-items: center; gap: 10px; }
+  .nav-icon { width: 28px; height: 28px; border-radius: 6px; background: var(--teal); display: flex; align-items: center; justify-content: center; }
+  .nav-icon svg { color: white; }
+  .nav-title { font-weight: 600; font-size: 14px; color: var(--ink); }
+  .nav-sub { font-size: 11px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; border-left: 1px solid var(--border); padding-left: 8px; margin-left: 4px; }
+  .nav-actions { display: flex; align-items: center; gap: 12px; }
+  /* Buttons */
+  .btn-primary { background: var(--teal); color: white; border: none; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity .15s; }
+  .btn-primary:hover { opacity: .88; }
+  .btn-ghost { background: transparent; color: var(--ink-3); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; transition: background .15s; display: flex; align-items: center; gap: 6px; }
+  .btn-ghost:hover { background: var(--surface-2); }
+  .btn-link { background: none; border: none; color: var(--teal); font-size: 12px; cursor: pointer; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+  .btn-link:hover { text-decoration: underline; }
+  /* Card */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  /* Main layout */
+  main { max-width: 1100px; margin: 0 auto; padding: 0 20px 64px; }
+  /* States */
+  .state { display: none; }
+  .state.active { display: block; }
+  /* Idle */
+  #idle-state { min-height: 85vh; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 64px 0; gap: 36px; }
+  #idle-state.active { display: flex; }
+  .hero-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; }
+  .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--go); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .hero-title { font-size: clamp(26px, 4vw, 36px); font-weight: 700; color: var(--ink); line-height: 1.25; text-align: center; }
+  .hero-title .accent { color: var(--teal); }
+  .hero-desc { font-size: 14px; color: var(--ink-3); line-height: 1.7; text-align: center; max-width: 480px; }
+  .db-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; font-size: 11px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; }
+  .db-list span.sep { color: var(--border); }
+  /* Search */
+  .search-box { width: 100%; max-width: 520px; }
+  .search-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .search-fields input { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 14px; font-family: inherit; background: var(--surface); color: var(--ink); outline: none; transition: border .15s; }
+  .search-fields input:focus { border-color: var(--teal); }
+  .search-fields input::placeholder { color: var(--ink-4); }
+  .search-submit { margin-top: 10px; width: 100%; padding: 11px; font-size: 14px; border-radius: 10px; }
+  .demo-row { display: flex; gap: 8px; margin-top: 8px; justify-content: center; flex-wrap: wrap; }
+  .demo-btn { font-size: 11px; padding: 5px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); color: var(--ink-3); cursor: pointer; font-family: 'JetBrains Mono', monospace; }
+  .demo-btn:hover { background: var(--surface-2); color: var(--ink-2); }
+  .demo-label { font-size: 11px; color: var(--ink-4); align-self: center; }
+  /* Value props */
+  .value-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; max-width: 520px; width: 100%; }
+  @media (min-width: 600px) { .value-grid { grid-template-columns: repeat(4, 1fr); } }
+  .value-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 12px; text-align: center; }
+  .value-icon { font-size: 22px; margin-bottom: 6px; }
+  .value-title { font-size: 11px; font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
+  .value-desc { font-size: 10px; color: var(--ink-4); line-height: 1.5; }
+  /* Loading */
+  #loading-state { min-height: 85vh; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 64px 0; }
+  #loading-state.active { display: flex; }
+  .loading-card { width: 100%; max-width: 460px; }
+  .loading-title { font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+  .loading-sub { font-size: 12px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; margin-bottom: 20px; }
+  .step-list { display: flex; flex-direction: column; gap: 8px; }
+  .step { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--surface-3); opacity: .35; transition: opacity .3s; }
+  .step.active { opacity: 1; }
+  .step.done { opacity: .7; }
+  .step-icon { width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+  .step.active .step-icon { background: var(--teal); border-color: var(--teal); color: white; animation: spin-once .5s; }
+  .step.done .step-icon { background: var(--go); border-color: var(--go); color: white; }
+  @keyframes spin-once { from { transform: rotate(-180deg); opacity: 0; } to { transform: rotate(0deg); opacity: 1; } }
+  .step-label { font-size: 13px; color: var(--ink-2); }
+  .step-time { font-size: 10px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; margin-left: auto; }
+  /* Error */
+  #error-state { min-height: 85vh; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 64px 0; }
+  #error-state.active { display: flex; }
+  .error-card { max-width: 380px; width: 100%; text-align: center; }
+  .error-title { color: var(--nogo); font-weight: 600; margin-bottom: 8px; }
+  .error-msg { font-size: 13px; color: var(--ink-3); margin-bottom: 6px; }
+  .error-hint { font-size: 11px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; margin-bottom: 16px; }
+  /* Results */
+  #results-state { padding: 32px 0; display: none; }
+  #results-state.active { display: block; }
+  .results-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  .results-target { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 600; color: var(--ink); }
+  .results-disease { color: var(--ink-2); font-size: 16px; }
+  .results-meta { font-size: 11px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+  /* Verdict hero */
+  .verdict-hero { border-radius: 16px; border: 1px solid var(--border); padding: 24px; background: var(--surface); display: grid; grid-template-columns: auto 1fr; gap: 24px; align-items: center; }
+  @media (max-width: 600px) { .verdict-hero { grid-template-columns: 1fr; } }
+  .score-ring-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .score-ring { position: relative; width: 130px; height: 130px; }
+  .score-ring svg { transform: rotate(-90deg); }
+  .score-ring-bg { fill: none; stroke: var(--surface-3); stroke-width: 10; }
+  .score-ring-fill { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 1.4s cubic-bezier(.23,1,.32,1); }
+  .score-ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .score-num { font-size: 28px; font-weight: 700; font-family: 'JetBrains Mono', monospace; line-height: 1; }
+  .score-max { font-size: 11px; color: var(--ink-4); }
+  .verdict-badge { padding: 5px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: .05em; }
+  .verdict-go { background: var(--go-light); color: var(--go); border: 1px solid #b3ddc8; }
+  .verdict-caution { background: var(--caution-light); color: var(--caution); border: 1px solid #f5d98a; }
+  .verdict-nogo { background: var(--nogo-light); color: var(--nogo); border: 1px solid #f2b8ba; }
+  .verdict-moderate { background: var(--caution-light); color: var(--caution); border: 1px solid #f5d98a; }
+  .score-subscores { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .subscore-label { font-size: 11px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .06em; font-family: 'JetBrains Mono', monospace; margin-bottom: 4px; }
+  .subscore-val { font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .subscore-bar { height: 4px; background: var(--surface-3); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .subscore-bar-fill { height: 100%; border-radius: 2px; transition: width 1.2s cubic-bezier(.23,1,.32,1); }
+  .verdict-info { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--surface-3); }
+  .verdict-target-label { font-size: 11px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .06em; font-family: 'JetBrains Mono', monospace; }
+  /* Tab nav */
+  .tab-nav { border-bottom: 1px solid var(--border); overflow-x: auto; margin: 20px 0 0; display: flex; }
+  .tab-btn { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--ink-3); border: none; background: none; cursor: pointer; white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s; }
+  .tab-btn:hover { color: var(--ink); }
+  .tab-btn.active { color: var(--teal); border-bottom-color: var(--teal); font-weight: 600; }
+  .tab-btn.has-critical { color: rgba(193,41,46,.65); }
+  /* Tab panels */
+  .tab-panel { display: none; padding-top: 20px; }
+  .tab-panel.active { display: block; }
+  /* Overview grid */
+  .overview-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 768px) { .overview-grid { grid-template-columns: 1fr 1fr; } }
+  .full-width { grid-column: 1 / -1; }
+  /* Metric row */
+  .metric-row { margin-bottom: 14px; }
+  .metric-row:last-child { margin-bottom: 0; }
+  .metric-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; flex-wrap: wrap; gap: 4px; }
+  .metric-label { font-size: 12px; color: var(--ink-3); }
+  .metric-ci { font-size: 10px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; margin-left: 6px; }
+  .metric-right { display: flex; align-items: center; gap: 8px; }
+  .metric-val { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+  .source-chip { font-size: 10px; color: var(--ink-4); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; text-decoration: none; display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+  .source-chip:hover { background: var(--surface-3); }
+  .bar-track { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+  /* Label mono */
+  .label-mono { font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-4); margin-bottom: 8px; }
+  /* Regulatory grid */
+  .reg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .reg-item-label { font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-4); margin-bottom: 4px; }
+  .reg-item-val { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
+  .desig-chip { font-size: 11px; font-family: 'JetBrains Mono', monospace; padding: 3px 10px; border-radius: 999px; background: var(--teal-light); border: 1px solid var(--teal-border); color: var(--teal); display: inline-block; }
+  .desig-wrap { display: flex; flex-wrap: gap; gap: 6px; margin-top: 8px; }
+  /* Flag */
+  .flag-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); margin-bottom: 10px; }
+  .flag-item:last-child { margin-bottom: 0; }
+  .flag-sev { font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700; text-transform: uppercase; padding: 3px 7px; border-radius: 4px; flex-shrink: 0; }
+  .sev-critical { background: var(--nogo-light); color: var(--nogo); }
+  .sev-high { background: var(--caution-light); color: var(--caution); }
+  .sev-medium { background: var(--surface-2); color: var(--ink-3); }
+  .sev-low { background: var(--surface-2); color: var(--ink-4); }
+  .flag-msg { font-size: 12px; color: var(--ink-3); line-height: 1.6; }
+  .flag-type { font-size: 10px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; margin-top: 3px; }
+  /* LLM synthesis */
+  .llm-card { }
+  .llm-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+  .llm-header-left { display: flex; align-items: center; gap: 8px; }
+  .llm-ai-badge { font-size: 10px; font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px; background: var(--teal-light); color: var(--teal); border: 1px solid var(--teal-border); }
+  .llm-chevron { font-size: 12px; color: var(--ink-4); transition: transform .2s; }
+  .llm-body { margin-top: 16px; font-size: 13px; color: var(--ink-2); line-height: 1.8; white-space: pre-wrap; }
+  .llm-body strong { font-weight: 600; color: var(--ink); }
+  /* Data source bar */
+  .datasource-bar { margin-top: 20px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .datasource-title { font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-4); margin-bottom: 10px; }
+  .datasource-items { display: flex; flex-wrap: wrap; gap: 8px; }
+  .datasource-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-3); }
+  .ds-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .ds-success { background: var(--go); }
+  .ds-partial { background: var(--caution); }
+  .ds-failed { background: var(--nogo); }
+  .ds-time { font-size: 10px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; }
+  /* Science tab sub-sections */
+  .sci-section { margin-bottom: 20px; }
+  .sci-section-title { font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 12px; border-bottom: 1px solid var(--surface-3); padding-bottom: 6px; }
+  .assoc-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--surface-3); font-size: 12px; }
+  .assoc-trait { color: var(--ink-2); }
+  .assoc-right { display: flex; align-items: center; gap: 10px; }
+  .assoc-score { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--teal); }
+  .assoc-source { font-size: 10px; color: var(--ink-4); background: var(--surface-2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+  .paper-item { padding: 10px 0; border-bottom: 1px solid var(--surface-3); }
+  .paper-title { font-size: 12px; font-weight: 500; color: var(--ink); margin-bottom: 4px; }
+  .paper-abstract { font-size: 11px; color: var(--ink-3); line-height: 1.5; }
+  .paper-meta { font-size: 10px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
+  .tissue-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .tissue-label { font-size: 11px; color: var(--ink-3); width: 80px; flex-shrink: 0; text-transform: capitalize; }
+  .tissue-track { flex: 1; height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
+  .tissue-fill { height: 100%; border-radius: 3px; background: var(--teal); }
+  .tissue-level { font-size: 10px; color: var(--ink-4); width: 70px; text-align: right; font-family: 'JetBrains Mono', monospace; }
+  /* Reg pathway full tab */
+  .reg-reasoning { margin-top: 14px; }
+  .reg-reasoning-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--surface-3); font-size: 12px; color: var(--ink-3); line-height: 1.6; }
+  .reg-reasoning-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); margin-top: 5px; flex-shrink: 0; }
+  /* Cost tab */
+  .cost-phase { padding: 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+  .cost-phase-name { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+  .cost-phase-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--ink-3); font-family: 'JetBrains Mono', monospace; }
+  .cost-summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .cost-summary-item { text-align: center; padding: 12px; background: var(--surface-2); border-radius: 10px; }
+  .cost-summary-val { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--teal); }
+  .cost-summary-label { font-size: 10px; color: var(--ink-4); font-family: 'JetBrains Mono', monospace; text-transform: uppercase; margin-top: 2px; }
+  /* IP tab */
+  .ip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .ip-grid { grid-template-columns: 1fr; } }
+  .ip-drug { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+  .ip-drug-name { font-size: 12px; font-weight: 600; color: var(--ink); }
+  .ip-drug-meta { font-size: 11px; color: var(--ink-3); font-family: 'JetBrains Mono', monospace; margin-top: 3px; }
+  /* GitHub link */
+  .gh-link { color: var(--ink-4); text-decoration: none; display: flex; align-items: center; }
+  .gh-link:hover { color: var(--ink-2); }
+  /* Fade in */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-up { animation: fadeUp .45s ease both; }
+  /* Responsive */
+  @media (max-width: 480px) {
+    .search-fields { grid-template-columns: 1fr; }
+    .score-subscores { grid-template-columns: 1fr; }
+    .cost-summary-grid { grid-template-columns: 1fr 1fr; }
+    .reg-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <div class="nav-icon">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      </div>
+      <span class="nav-title">PointMe</span>
+      <span class="nav-sub" id="nav-sub">Drug Target Validation</span>
+    </div>
+    <div class="nav-actions">
+      <button class="btn-ghost" id="new-search-btn" style="display:none" onclick="resetApp()">
+        ← New Search
+      </button>
+      <a class="gh-link" href="https://github.com/sumanthgb/PointMe" target="_blank" rel="noopener noreferrer" title="GitHub">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.341-3.369-1.341-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<main>
+
+<!-- IDLE STATE -->
+<div id="idle-state" class="active">
+  <div style="text-align:center; space-y:16px">
+    <div class="hero-badge">
+      <div class="pulse-dot"></div>
+      6 live databases · Real-time analysis
+    </div>
+    <h1 class="hero-title" style="margin-top:12px">
+      The checkpoint between<br>
+      <span class="accent">discovery</span> and <span class="accent">development</span>
+    </h1>
+    <p class="hero-desc" style="margin-top:12px">
+      Cross-reference genetic evidence, clinical trial history, regulatory precedent, and safety signals
+      in seconds — before committing to clinical development.
+    </p>
+    <div class="db-list" style="margin-top:12px">
+      <span>Open Targets</span><span class="sep">·</span>
+      <span>ClinicalTrials.gov</span><span class="sep">·</span>
+      <span>PubMed</span><span class="sep">·</span>
+      <span>UniProt</span><span class="sep">·</span>
+      <span>Drugs@FDA</span><span class="sep">·</span>
+      <span>FDA Orange Book</span>
+    </div>
+  </div>
+
+  <div class="search-box">
+    <div class="search-fields">
+      <input id="target-input" type="text" placeholder="Target (e.g. KRAS G12C)" autocomplete="off" />
+      <input id="disease-input" type="text" placeholder="Disease (e.g. NSCLC)" autocomplete="off" />
+    </div>
+    <button class="btn-primary search-submit" onclick="handleSubmit()">Evaluate Target →</button>
+    <div class="demo-row" style="margin-top:10px">
+      <span class="demo-label">Try:</span>
+      <button class="demo-btn" onclick="loadDemo('kras')">KRAS G12C / NSCLC</button>
+      <button class="demo-btn" onclick="loadDemo('bace1')">BACE1 / Alzheimer's</button>
+    </div>
+  </div>
+
+  <div class="value-grid">
+    <div class="value-card">
+      <div class="value-icon">🧬</div>
+      <div class="value-title">Genetic evidence</div>
+      <div class="value-desc">GWAS &amp; rare-variant associations from Open Targets</div>
+    </div>
+    <div class="value-card">
+      <div class="value-icon">📋</div>
+      <div class="value-title">Trial history</div>
+      <div class="value-desc">Every phase, failure reason, and stopping criterion</div>
+    </div>
+    <div class="value-card">
+      <div class="value-icon">⚡</div>
+      <div class="value-title">Cross-reference</div>
+      <div class="value-desc">Catches contradictions and corroborated risks</div>
+    </div>
+    <div class="value-card">
+      <div class="value-icon">🏛</div>
+      <div class="value-title">Regulatory pathway</div>
+      <div class="value-desc">Deterministic rules engine — every decision is auditable</div>
+    </div>
+  </div>
+</div>
+
+<!-- LOADING STATE -->
+<div id="loading-state">
+  <div class="card loading-card fade-up">
+    <div class="loading-title" id="loading-title">Evaluating target…</div>
+    <div class="loading-sub" id="loading-sub"></div>
+    <div class="step-list" id="step-list"></div>
+  </div>
+</div>
+
+<!-- ERROR STATE -->
+<div id="error-state">
+  <div class="card error-card fade-up">
+    <div class="error-title">Evaluation failed</div>
+    <div class="error-msg" id="error-msg"></div>
+    <div class="error-hint" id="error-hint">Connecting to https://pointme-api.onrender.com</div>
+    <button class="btn-primary" onclick="resetApp()">Try Again</button>
+  </div>
+</div>
+
+<!-- RESULTS STATE -->
+<div id="results-state">
+  <div class="fade-up">
+    <!-- Header -->
+    <div class="results-header">
+      <div>
+        <div>
+          <span class="results-target" id="result-target"></span>
+          <span style="color:var(--ink-4);margin:0 8px">×</span>
+          <span class="results-disease" id="result-disease"></span>
+        </div>
+        <div class="results-meta" id="result-meta"></div>
+      </div>
+      <button class="btn-ghost" onclick="exportJSON()">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export JSON
+      </button>
+    </div>
+
+    <!-- Verdict hero -->
+    <div class="verdict-hero">
+      <div class="score-ring-wrap">
+        <div class="score-ring">
+          <svg width="130" height="130" viewBox="0 0 130 130">
+            <circle class="score-ring-bg" cx="65" cy="65" r="55"/>
+            <circle class="score-ring-fill" id="ring-fill" cx="65" cy="65" r="55"
+              stroke-dasharray="345.4"
+              stroke-dashoffset="345.4"/>
+          </svg>
+          <div class="score-ring-label">
+            <div class="score-num" id="ring-score">—</div>
+            <div class="score-max">/100</div>
+          </div>
+        </div>
+        <span class="verdict-badge" id="verdict-badge"></span>
+      </div>
+      <div>
+        <div class="score-subscores">
+          <div>
+            <div class="subscore-label">Science Score</div>
+            <div class="subscore-val" id="science-score-val">—</div>
+            <div class="subscore-bar"><div class="subscore-bar-fill" id="science-bar" style="width:0%;background:var(--teal)"></div></div>
+          </div>
+          <div>
+            <div class="subscore-label">Regulatory Score</div>
+            <div class="subscore-val" id="reg-score-val">—</div>
+            <div class="subscore-bar"><div class="subscore-bar-fill" id="reg-bar" style="width:0%;background:var(--gold)"></div></div>
+          </div>
+        </div>
+        <div class="verdict-info">
+          <div class="verdict-target-label">Evaluated target</div>
+          <div style="font-size:14px;color:var(--ink);margin-top:4px" id="verdict-target-text"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tab-nav" id="tab-nav">
+      <button class="tab-btn active" onclick="switchTab('overview',this)">Overview</button>
+      <button class="tab-btn" onclick="switchTab('science',this)">Scientific Evidence</button>
+      <button class="tab-btn" onclick="switchTab('regulatory',this)">Regulatory Pathway</button>
+      <button class="tab-btn" onclick="switchTab('cost',this)">Development Cost</button>
+      <button class="tab-btn" onclick="switchTab('ip',this)">IP &amp; Privacy</button>
+      <button class="tab-btn" id="flags-tab-btn" onclick="switchTab('flags',this)">Risk Flags</button>
+    </div>
+
+    <!-- Tab panels -->
+    <div id="tab-overview" class="tab-panel active"></div>
+    <div id="tab-science" class="tab-panel"></div>
+    <div id="tab-regulatory" class="tab-panel"></div>
+    <div id="tab-cost" class="tab-panel"></div>
+    <div id="tab-ip" class="tab-panel"></div>
+    <div id="tab-flags" class="tab-panel"></div>
+
+    <!-- Data source bar -->
+    <div class="datasource-bar" id="datasource-bar"></div>
+  </div>
+</div>
+
+</main>
+
+<script>
+const API_BASE = 'https://pointme-api.onrender.com';
+
+let currentData = null;
+let llmExpanded = false;
+
+// ── State management ─────────────────────────────────────────────────────────
+function showState(name) {
+  ['idle','loading','error','results'].forEach(s => {
+    const el = document.getElementById(s + '-state');
+    if (el) el.classList.toggle('active', s === name);
+  });
+  document.getElementById('new-search-btn').style.display = name === 'results' ? 'flex' : 'none';
+}
+
+function resetApp() {
+  currentData = null;
+  showState('idle');
+  document.getElementById('target-input').value = '';
+  document.getElementById('disease-input').value = '';
+}
+
+// ── Demo presets ──────────────────────────────────────────────────────────────
+const MOCK_KRAS = {"target":"KRAS G12C","disease":"non-small cell lung cancer","scores":{"science_score":78.4,"regulatory_score":61.2,"combined_score":69.8,"recommendation":"GO","confidence":null},"scientific_evidence":{"genetic":{"score":0.85,"associations":12,"top_associations":[{"study_id":"EFO_0003060","trait":"Non-small cell lung carcinoma","score":0.85,"source":"GWAS"},{"study_id":"EFO_0005140","trait":"Lung adenocarcinoma","score":0.78,"source":"rare_variant"},{"study_id":"EFO_0000389","trait":"Lung cancer","score":0.71,"source":"GWAS"},{"study_id":"EFO_0006859","trait":"KRAS mutation positive NSCLC","score":0.65,"source":"rare_variant"}]},"clinical_trials":{"active":8,"completed":15,"failed":3,"success_rate":0.83,"phases":{"Phase 1":6,"Phase 2":9,"Phase 3":5,"Phase 4":3}},"literature":{"total_papers":2847,"relevance_score":0.91,"key_papers":[{"pmid":"32795706","title":"Sotorasib for Lung Cancers with KRAS p.G12C Mutation","abstract":"In this phase 2 trial, sotorasib showed durable clinical benefit in patients with KRAS G12C–mutated advanced NSCLC who had received prior therapies.","year":2021,"journal":"New England Journal of Medicine","citation_count":1420},{"pmid":"34506199","title":"Adagrasib in Non-Small-Cell Lung Cancer Harboring a KRAS G12C Mutation","abstract":"Adagrasib demonstrated clinically meaningful efficacy in patients with KRAS G12C–mutated previously treated NSCLC, with a manageable safety profile.","year":2022,"journal":"New England Journal of Medicine","citation_count":1180},{"pmid":"35733654","title":"Resistance mechanisms to KRAS G12C inhibitors","abstract":"Secondary KRAS mutations and bypass pathway activation are the primary mechanisms driving acquired resistance to covalent KRAS G12C inhibitors.","year":2022,"journal":"Nature Medicine","citation_count":340}]},"expression":{"primary_tissues":[{"tissue":"lung","level":"High","level_numeric":1.0},{"tissue":"colon","level":"Medium","level_numeric":0.6},{"tissue":"pancreas","level":"Medium","level_numeric":0.55},{"tissue":"liver","level":"Low","level_numeric":0.3},{"tissue":"kidney","level":"Low","level_numeric":0.25},{"tissue":"brain","level":"Low","level_numeric":0.2}],"function_summary":"GTPase that functions as a molecular switch cycling between active GTP-bound and inactive GDP-bound states. Critical regulator of the RAS/MAPK signaling pathway controlling cell proliferation, differentiation, and survival.","subcellular_location":["Cell membrane","Cytoplasm"]},"tractability":{"score":1.0,"molecule_type":"small_molecule","known_drugs_in_pipeline":7}},"regulatory_assessment":{"recommended_pathway":"505(b)(1)","special_designations":["fast_track","breakthrough_therapy"],"estimated_timeline_years":"5-7 years","estimated_cost_range":"$800M–$2B","reasoning":["No approved drugs with same MOA found and molecule is a small molecule → standard 505(b)(1) NDA pathway.","Disease prevalence unknown — manual orphan drug eligibility check recommended.","Disease is serious/life-threatening AND unmet medical need is indicated → eligible for Fast Track designation.","Serious condition + strong genetic evidence + prior Phase completion → may be eligible for Breakthrough Therapy designation.","Special designations (fast_track, breakthrough_therapy) may reduce timeline and cost estimates above."]},"flags":[{"type":"contradiction","severity":"high","message":"Strong genetic association (0.85) but 3 failed/terminated trials exist. Target is genetically validated but faces translational barriers — likely resistance mechanisms, not target invalidity.","details":{"genetic_score":0.85,"failed_trials":3}},{"type":"safety_flag","severity":"medium","message":"High lung expression (1.00) detected. For an NSCLC program this is expected, but on-target pulmonary toxicity should be monitored in IND-enabling studies.","details":{"organ":"lung","expression_level":1.0}}],"llm_synthesis":"**EXECUTIVE SUMMARY**\n\nPointMe recommends **GO** for KRAS G12C in non-small cell lung cancer (combined score: 69.8/100). FDA approval of Sotorasib (2021) and Adagrasib (2022) establishes strong proof-of-concept, and the genetic evidence (score: 0.85 across 12 GWAS/rare-variant associations) independently validates KRAS G12C as a causal driver. The 3 prior trial failures reflect translational barriers—not target invalidity—making differentiated resistance-mechanism strategies viable.\n\n**SCIENTIFIC EVIDENCE ASSESSMENT**\n\nGenetic evidence is compelling: 12 GWAS/rare variant associations with a top score of 0.85 establish KRAS G12C as a causal driver in NSCLC. The clinical trial landscape is mature, with 15 completed trials and an 83% success rate. The 2,847 publications reflect a highly active research field.\n\n**REGULATORY PATHWAY ANALYSIS**\n\nRecommended pathway: **505(b)(1) NDA**. Fast Track and Breakthrough Therapy designations are achievable, potentially compressing the 5–7 year estimated timeline.\n\n**RISK FLAGS**\n\n→ [HIGH] Genetic-trial contradiction: Strong genetics but 3 failures. Likely resistance mechanisms, not target biology.\n\n→ [MEDIUM] Lung expression safety flag: High on-target expression expected for NSCLC but warrants IND-enabling pulmonary safety monitoring.\n\n**CONFIDENCE NOTE**\n\nAll 6 data sources returned successfully. Confidence: High.","data_sources":{"open_targets":{"status":"success","query_time_ms":412},"clinicaltrials":{"status":"success","query_time_ms":634},"pubmed":{"status":"success","query_time_ms":891},"uniprot":{"status":"success","query_time_ms":287},"fda_drugs":{"status":"success","query_time_ms":503},"orange_book":{"status":"partial","query_time_ms":341}},"cost_estimate":null};
+
+const MOCK_BACE1 = {"target":"BACE1","disease":"Alzheimer's disease","scores":{"science_score":61.3,"regulatory_score":38.5,"combined_score":22.1,"recommendation":"NO-GO","confidence":null},"scientific_evidence":{"genetic":{"score":0.74,"associations":8,"top_associations":[{"study_id":"EFO_0000249","trait":"Alzheimer's disease","score":0.74,"source":"GWAS"},{"study_id":"EFO_0006792","trait":"Late-onset Alzheimer disease","score":0.68,"source":"rare_variant"},{"study_id":"EFO_0000249","trait":"Amyloid precursor protein processing","score":0.61,"source":"GWAS"}]},"clinical_trials":{"active":0,"completed":2,"failed":5,"success_rate":0.07,"phases":{"Phase 1":2,"Phase 2":3,"Phase 3":2}},"literature":{"total_papers":4102,"relevance_score":0.82,"key_papers":[{"pmid":"29415497","title":"Atabecestat in subjects with preclinical Alzheimer disease","abstract":"Atabecestat (JNJ-54861911) was discontinued in Phase 2b/3 due to liver toxicity signals. 77% increase in transaminases observed.","year":2018,"journal":"Nature Medicine","citation_count":410},{"pmid":"30104963","title":"Verubecestat for prodromal Alzheimer disease: APECS trial results","abstract":"Verubecestat did not improve clinical outcomes in prodromal AD and worsened cognitive function at higher doses. Phase 3 terminated.","year":2019,"journal":"New England Journal of Medicine","citation_count":890},{"pmid":"31495781","title":"Lanabecestat for Alzheimer disease: AMARANTH and DAYBREAK-ALZ Phase 3 trials stopped","abstract":"Both Phase 3 studies of lanabecestat were halted for futility after interim analysis.","year":2019,"journal":"JAMA Neurology","citation_count":320}]},"expression":{"primary_tissues":[{"tissue":"brain","level":"High","level_numeric":0.95},{"tissue":"liver","level":"High","level_numeric":0.88},{"tissue":"kidney","level":"Medium","level_numeric":0.55},{"tissue":"pancreas","level":"Medium","level_numeric":0.48},{"tissue":"heart","level":"Low","level_numeric":0.3},{"tissue":"lung","level":"Low","level_numeric":0.22}],"function_summary":"Aspartyl protease responsible for the cleavage of amyloid precursor protein (APP) at the β-site, generating the N-terminus of the amyloid β-peptide. Essential role in myelination; expressed in multiple organs beyond the CNS.","subcellular_location":["Endosome membrane","Cell membrane","Golgi apparatus"]},"tractability":{"score":0.55,"molecule_type":"small_molecule","known_drugs_in_pipeline":0}},"regulatory_assessment":{"recommended_pathway":"505(b)(1)","special_designations":["fast_track","breakthrough_therapy"],"estimated_timeline_years":"10-15 years","estimated_cost_range":"$3B–$5B+","reasoning":["No approved drugs with same MOA found → standard 505(b)(1) NDA pathway.","Alzheimer's disease prevalence (6M+ US) exceeds orphan threshold — orphan drug designation not available.","Disease is serious/life-threatening AND unmet medical need is severe → eligible for Fast Track designation.","Strong genetic evidence + serious condition → Breakthrough Therapy designation potentially available, but 5 prior Phase 3 failures will require extensive regulatory justification.","Note: FDA has issued guidance following multiple BACE1 inhibitor failures. Any new BACE1 program will face heightened regulatory scrutiny."]},"flags":[{"type":"corroborated_risk","severity":"critical","message":"CRITICAL: High hepatic expression (0.88) CORROBORATES liver toxicity seen in 3/5 clinical trials. Atabecestat, verubecestat, and elenbecestat all showed hepatotoxicity signals. This is a mechanism-driven safety liability, not formulation-dependent.","details":{"organ":"liver","expression_level":0.88}},{"type":"contradiction","severity":"critical","message":"CRITICAL: 5 Phase 2/3 trials terminated — 0% Phase 3 approval rate. All major pharma BACE1 programs have failed (Merck, Lilly/AstraZeneca, Janssen, Eisai/Biogen). Genetic validation (0.74) does not overcome translational failure pattern.","details":{"genetic_score":0.74,"failed_trials":5}},{"type":"safety_flag","severity":"high","message":"Neuropsychiatric side effects (depression, suicidality) observed across multiple BACE1 inhibitor programs, likely from disruption of neuregulin-1 processing — a non-APP BACE1 substrate.","details":{}},{"type":"data_gap","severity":"medium","message":"No active programs in pipeline. All known drug candidates have been discontinued. This represents a near-complete industry exit from this target — a strong market signal.","details":{}}],"llm_synthesis":"**EXECUTIVE SUMMARY**\n\nPointMe recommends **NO-GO** for BACE1 in Alzheimer's disease (combined score: 22.1/100). This is one of the most extensively validated failures in modern drug development. Five Phase 2/3 clinical trials from four major pharmaceutical companies have been terminated, with an estimated $10B in capital lost. The genetic evidence (score: 0.74) is real — BACE1 cleaves APP to produce amyloid-β — but it does not overcome a systematic translational failure pattern driven by mechanism-linked liver toxicity and neuropsychiatric side effects.\n\n**THE CRITICAL FINDING**\n\nHigh hepatic BACE1 expression (0.88) directly explains the liver toxicity observed in 3 of 5 clinical trials. This is not a formulation problem — it is an on-target consequence of inhibiting BACE1 in the liver, where it plays a role in lipid metabolism.\n\n**SCIENTIFIC EVIDENCE ASSESSMENT**\n\nThe genetic evidence for BACE1 in Alzheimer's is legitimate (0.74 across 8 GWAS associations), but BACE1 has over 50 known substrates beyond APP, including neuregulin-1 (essential for myelination). Inhibiting BACE1 comprehensively causes collateral biology.\n\n**REGULATORY PATH**\n\nFast Track and Breakthrough Therapy designations are theoretically available, but following 5 Phase 3 failures, FDA will require a compelling mechanistic differentiation argument before approving a new IND.\n\n**CONFIDENCE NOTE**\n\nAll 6 data sources returned successfully. Confidence: High. The weight of evidence against this target is exceptionally strong.","data_sources":{"open_targets":{"status":"success","query_time_ms":388},"clinicaltrials":{"status":"success","query_time_ms":711},"pubmed":{"status":"success","query_time_ms":924},"uniprot":{"status":"success","query_time_ms":301},"fda_drugs":{"status":"success","query_time_ms":456},"orange_book":{"status":"success","query_time_ms":298}},"cost_estimate":null};
+
+function loadDemo(key) {
+  const d = key === 'kras' ? MOCK_KRAS : MOCK_BACE1;
+  renderResults(d);
+}
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+async function handleSubmit() {
+  const target = document.getElementById('target-input').value.trim();
+  const disease = document.getElementById('disease-input').value.trim();
+  if (!target || !disease) {
+    alert('Please enter both a target and a disease.');
+    return;
+  }
+  showState('loading');
+  startLoadingAnimation(target, disease);
+  try {
+    const res = await fetch(`${API_BASE}/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, disease }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    renderResults(data);
+  } catch (e) {
+    document.getElementById('error-msg').textContent = e.message;
+    document.getElementById('error-hint').textContent = `Connecting to ${API_BASE}`;
+    showState('error');
+  }
+}
+
+// ── Loading animation ─────────────────────────────────────────────────────────
+const LOADING_STEPS = [
+  { icon: '🧬', label: 'Open Targets — genetic evidence' },
+  { icon: '🏥', label: 'ClinicalTrials.gov — trial landscape' },
+  { icon: '📚', label: 'PubMed — literature corpus' },
+  { icon: '🔬', label: 'UniProt — expression & function' },
+  { icon: '💊', label: 'Drugs@FDA — approval history' },
+  { icon: '📖', label: 'FDA Orange Book — IP landscape' },
+  { icon: '⚖️', label: 'Running regulatory rules engine' },
+  { icon: '🔗', label: 'Cross-referencing evidence' },
+  { icon: '📊', label: 'Computing TargetIQ scores' },
+  { icon: '🤖', label: 'Synthesizing with AI' },
+];
+
+let loadingTimer = null;
+function startLoadingAnimation(target, disease) {
+  clearTimeout(loadingTimer);
+  document.getElementById('loading-title').textContent = `Evaluating ${target}`;
+  document.getElementById('loading-sub').textContent = `${target} × ${disease}`;
+  const list = document.getElementById('step-list');
+  list.innerHTML = LOADING_STEPS.map((s, i) => `
+    <div class="step" id="lstep-${i}">
+      <div class="step-icon">${s.icon}</div>
+      <div class="step-label">${s.label}</div>
+      <div class="step-time" id="lstep-time-${i}"></div>
+    </div>`).join('');
+  let idx = 0;
+  const advance = () => {
+    if (idx > 0) {
+      const prev = document.getElementById(`lstep-${idx-1}`);
+      if (prev) { prev.classList.remove('active'); prev.classList.add('done'); prev.querySelector('.step-icon').textContent = '✓'; }
+    }
+    if (idx < LOADING_STEPS.length) {
+      const cur = document.getElementById(`lstep-${idx}`);
+      if (cur) cur.classList.add('active');
+      idx++;
+      const delay = idx <= 6 ? 900 : 700;
+      loadingTimer = setTimeout(advance, delay);
+    }
+  };
+  advance();
+}
+
+// ── Render results ────────────────────────────────────────────────────────────
+function renderResults(data) {
+  clearTimeout(loadingTimer);
+  currentData = data;
+  const s = data.scores;
+
+  // Header
+  document.getElementById('result-target').textContent = data.target;
+  document.getElementById('result-disease').textContent = data.disease;
+  const totalMs = Object.values(data.data_sources).reduce((a, v) => a + (v.query_time_ms || 0), 0);
+  document.getElementById('result-meta').textContent =
+    `Evaluated across ${Object.keys(data.data_sources).length} sources · ${totalMs.toLocaleString()}ms total`;
+
+  // Verdict ring
+  const score = s.combined_score;
+  document.getElementById('ring-score').textContent = score.toFixed(1);
+  const circumference = 345.4;
+  const offset = circumference - (score / 100) * circumference;
+  const fill = document.getElementById('ring-fill');
+  const color = verdictColor(s.recommendation);
+  fill.style.stroke = color;
+  setTimeout(() => { fill.style.strokeDashoffset = offset; }, 80);
+
+  // Verdict badge
+  const badge = document.getElementById('verdict-badge');
+  badge.textContent = s.recommendation;
+  badge.className = 'verdict-badge ' + verdictClass(s.recommendation);
+
+  // Subscores
+  document.getElementById('science-score-val').textContent = s.science_score.toFixed(1);
+  document.getElementById('reg-score-val').textContent = s.regulatory_score.toFixed(1);
+  setTimeout(() => {
+    document.getElementById('science-bar').style.width = s.science_score + '%';
+    document.getElementById('reg-bar').style.width = s.regulatory_score + '%';
+  }, 120);
+
+  document.getElementById('verdict-target-text').textContent = `${data.target} in ${data.disease}`;
+
+  // Flags tab button
+  const ftb = document.getElementById('flags-tab-btn');
+  ftb.textContent = `Risk Flags${data.flags.length > 0 ? ` (${data.flags.length})` : ''}`;
+  if (data.flags.some(f => f.severity === 'critical')) ftb.classList.add('has-critical');
+  else ftb.classList.remove('has-critical');
+
+  // Render all tab panels
+  renderOverviewTab(data);
+  renderScienceTab(data);
+  renderRegulatoryTab(data);
+  renderCostTab(data);
+  renderIPTab(data);
+  renderFlagsTab(data);
+
+  // Data source bar
+  renderDataSourceBar(data.data_sources);
+
+  // Reset to overview tab
+  switchTabById('overview');
+
+  showState('results');
+}
+
+function verdictColor(rec) {
+  if (rec === 'GO') return '#2D936C';
+  if (rec === 'NO-GO') return '#C1292E';
+  return '#D4930D';
+}
+function verdictClass(rec) {
+  if (rec === 'GO') return 'verdict-go';
+  if (rec === 'NO-GO') return 'verdict-nogo';
+  if (rec === 'MODERATE CAUTION') return 'verdict-moderate';
+  return 'verdict-caution';
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + id).classList.add('active');
+}
+function switchTabById(id) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const nav = document.getElementById('tab-nav');
+  const buttons = nav.querySelectorAll('.tab-btn');
+  const tabMap = ['overview','science','regulatory','cost','ip','flags'];
+  const idx = tabMap.indexOf(id);
+  if (idx >= 0 && buttons[idx]) buttons[idx].classList.add('active');
+  const panel = document.getElementById('tab-' + id);
+  if (panel) panel.classList.add('active');
+}
+
+// ── Overview tab ──────────────────────────────────────────────────────────────
+function renderOverviewTab(data) {
+  const ev = data.scientific_evidence;
+  const ct = ev.clinical_trials;
+  const srColor = ct.success_rate > 0.6 ? '#2D936C' : ct.success_rate > 0.3 ? '#D4930D' : '#C1292E';
+  const conf = data.scores.confidence;
+  const ciHtml = conf && conf.n_trials_observed > 0
+    ? `<span class="metric-ci">95% CI [${(conf.success_rate_ci_low*100).toFixed(0)}–${(conf.success_rate_ci_high*100).toFixed(0)}%] · N=${conf.n_trials_observed}</span>`
+    : '';
+
+  const reg = data.regulatory_assessment;
+  const desigHtml = reg.special_designations.length > 0
+    ? `<div class="desig-wrap">${reg.special_designations.map(d => `<span class="desig-chip">${d.replace(/_/g,' ')}</span>`).join(' ')}</div>`
+    : '';
+
+  const topFlags = data.flags.slice(0,2).map(f => `
+    <div class="flag-item" style="padding:8px 10px">
+      <span class="flag-sev sev-${f.severity}">${f.severity}</span>
+      <p class="flag-msg" style="font-size:11px">${f.message}</p>
+    </div>`).join('');
+
+  const flagsCard = data.flags.length > 0 ? `
+    <div class="card" style="margin-top:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <p class="label-mono">Risk flags</p>
+        <button class="btn-link" onclick="switchTabById('flags')">View all ↗</button>
+      </div>
+      ${topFlags}
+    </div>` : '';
+
+  const llmText = (data.llm_synthesis || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+  document.getElementById('tab-overview').innerHTML = `
+    <div class="overview-grid">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <p class="label-mono">Scientific evidence summary</p>
+          <button class="btn-link" onclick="switchTabById('science')">View all ↗</button>
+        </div>
+        ${metricRow('Genetic association score', ev.genetic.score.toFixed(2), ev.genetic.score, '#0D4F4F', 'Open Targets', 'https://www.opentargets.org')}
+        ${metricRow('Literature relevance', ev.literature.relevance_score.toFixed(2), ev.literature.relevance_score, '#0D4F4F', ev.literature.total_papers.toLocaleString() + ' papers · PubMed', 'https://pubmed.ncbi.nlm.nih.gov')}
+        <div class="metric-row">
+          <div class="metric-header">
+            <div><span class="metric-label">Trial success rate</span>${ciHtml}</div>
+            <div class="metric-right">
+              <span class="metric-val" style="color:${srColor}">${(ct.success_rate*100).toFixed(0)}%</span>
+              <a class="source-chip" href="https://clinicaltrials.gov" target="_blank">${ct.failed} failed · ClinicalTrials.gov ↗</a>
+            </div>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:${ct.success_rate*100}%;background:${srColor}"></div></div>
+        </div>
+        ${metricRow('Tractability score', ev.tractability.score.toFixed(2), ev.tractability.score, '#B8953E', ev.tractability.molecule_type + ' · Open Targets', 'https://www.opentargets.org')}
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <p class="label-mono">Regulatory pathway summary</p>
+            <button class="btn-link" onclick="switchTabById('regulatory')">Full analysis ↗</button>
+          </div>
+          <div class="reg-grid">
+            <div><div class="reg-item-label">Pathway</div><div class="reg-item-val">${reg.recommended_pathway || '—'}</div></div>
+            <div><div class="reg-item-label">Timeline</div><div class="reg-item-val">${reg.estimated_timeline_years || '—'}</div></div>
+            <div><div class="reg-item-label">Est. cost</div><div class="reg-item-val">${reg.estimated_cost_range || '—'}</div></div>
+            <div><div class="reg-item-label">Designations</div><div class="reg-item-val">${reg.special_designations.length > 0 ? reg.special_designations.length + ' available' : 'None'}</div></div>
+          </div>
+          ${desigHtml}
+        </div>
+        ${flagsCard}
+      </div>
+
+      <div class="full-width card llm-card">
+        <div class="llm-header" onclick="toggleLLM()">
+          <div class="llm-header-left">
+            <p class="label-mono" style="margin:0">AI Assessment</p>
+            <span class="llm-ai-badge">Claude</span>
+          </div>
+          <span class="llm-chevron" id="llm-chevron">▼</span>
+        </div>
+        <div class="llm-body" id="llm-body">${llmText || '<span style="color:var(--ink-4);font-style:italic">No synthesis available.</span>'}</div>
+      </div>
+    </div>`;
+}
+
+function metricRow(label, value, numVal, color, sourceLabel, sourceUrl) {
+  const pct = Math.min(numVal, 1) * 100;
+  return `<div class="metric-row">
+    <div class="metric-header">
+      <span class="metric-label">${label}</span>
+      <div class="metric-right">
+        <span class="metric-val" style="color:${color}">${value}</span>
+        <a class="source-chip" href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceLabel} ↗</a>
+      </div>
+    </div>
+    <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+  </div>`;
+}
+
+function toggleLLM() {
+  llmExpanded = !llmExpanded;
+  document.getElementById('llm-body').style.display = llmExpanded ? 'none' : 'block';
+  document.getElementById('llm-chevron').style.transform = llmExpanded ? 'rotate(-90deg)' : '';
+}
+
+// ── Science tab ───────────────────────────────────────────────────────────────
+function renderScienceTab(data) {
+  const ev = data.scientific_evidence;
+  const assocs = (ev.genetic.top_associations || []).map(a => `
+    <div class="assoc-item">
+      <span class="assoc-trait">${a.trait}</span>
+      <div class="assoc-right">
+        <span class="assoc-score">${a.score.toFixed(2)}</span>
+        <span class="assoc-source">${a.source}</span>
+      </div>
+    </div>`).join('');
+
+  const ct = ev.clinical_trials;
+  const phases = Object.entries(ct.phases || {}).map(([k,v]) => `<span style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);font-family:'JetBrains Mono',monospace">${k}: ${v}</span>`).join(' ');
+
+  const papers = (ev.literature.key_papers || []).map(p => `
+    <div class="paper-item">
+      <div class="paper-title">${p.title}</div>
+      <div class="paper-abstract">${p.abstract}</div>
+      <div class="paper-meta">${p.year}${p.journal ? ' · ' + p.journal : ''}${p.citation_count ? ' · ' + p.citation_count + ' citations' : ''} · PMID ${p.pmid}</div>
+    </div>`).join('');
+
+  const tissues = (ev.expression.primary_tissues || []).map(t => `
+    <div class="tissue-bar">
+      <div class="tissue-label">${t.tissue}</div>
+      <div class="tissue-track"><div class="tissue-fill" style="width:${t.level_numeric*100}%"></div></div>
+      <div class="tissue-level">${t.level}</div>
+    </div>`).join('');
+
+  document.getElementById('tab-science').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <div class="sci-section-title">Genetic Evidence (${ev.genetic.associations} associations)</div>
+        ${assocs || '<p style="font-size:12px;color:var(--ink-4)">No association data.</p>'}
+        <div style="margin-top:10px;font-size:11px;color:var(--ink-4)">Aggregate score: <strong style="color:var(--teal)">${ev.genetic.score.toFixed(2)}</strong></div>
+      </div>
+      <div class="card">
+        <div class="sci-section-title">Clinical Trial Landscape</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+          <div style="text-align:center;padding:10px;background:var(--go-light);border-radius:8px">
+            <div style="font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--go)">${ct.active}</div>
+            <div style="font-size:10px;color:var(--go);text-transform:uppercase;font-family:'JetBrains Mono',monospace">Active</div>
+          </div>
+          <div style="text-align:center;padding:10px;background:var(--teal-light);border-radius:8px">
+            <div style="font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--teal)">${ct.completed}</div>
+            <div style="font-size:10px;color:var(--teal);text-transform:uppercase;font-family:'JetBrains Mono',monospace">Completed</div>
+          </div>
+          <div style="text-align:center;padding:10px;background:var(--nogo-light);border-radius:8px">
+            <div style="font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--nogo)">${ct.failed}</div>
+            <div style="font-size:10px;color:var(--nogo);text-transform:uppercase;font-family:'JetBrains Mono',monospace">Failed</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${phases}</div>
+        <div style="margin-top:10px;font-size:11px;color:var(--ink-4)">Success rate: <strong style="color:${ct.success_rate>0.6?'var(--go)':ct.success_rate>0.3?'var(--caution)':'var(--nogo)'}">${(ct.success_rate*100).toFixed(0)}%</strong></div>
+      </div>
+      <div class="card" style="grid-column:1/-1">
+        <div class="sci-section-title">Key Literature (${ev.literature.total_papers.toLocaleString()} papers · relevance: ${ev.literature.relevance_score.toFixed(2)})</div>
+        ${papers}
+      </div>
+      <div class="card">
+        <div class="sci-section-title">Tissue Expression</div>
+        ${tissues}
+        ${ev.expression.subcellular_location?.length ? `<div style="margin-top:10px;font-size:11px;color:var(--ink-4)">Location: ${ev.expression.subcellular_location.join(', ')}</div>` : ''}
+      </div>
+      <div class="card">
+        <div class="sci-section-title">Target Function</div>
+        <p style="font-size:12px;color:var(--ink-2);line-height:1.7">${ev.expression.function_summary || 'No data available.'}</p>
+        <div style="margin-top:14px">
+          <div class="sci-section-title">Tractability</div>
+          <div style="font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--teal)">${ev.tractability.score.toFixed(2)}</div>
+          <div style="font-size:11px;color:var(--ink-4);margin-top:2px">${ev.tractability.molecule_type} · ${ev.tractability.known_drugs_in_pipeline} drugs in pipeline</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Regulatory tab ────────────────────────────────────────────────────────────
+function renderRegulatoryTab(data) {
+  const reg = data.regulatory_assessment;
+  const desigs = reg.special_designations.map(d =>
+    `<span class="desig-chip">${d.replace(/_/g,' ')}</span>`).join(' ');
+  const reasoning = (reg.reasoning || []).map(r => `
+    <div class="reg-reasoning-item">
+      <div class="reg-reasoning-dot"></div>
+      <span>${r}</span>
+    </div>`).join('');
+
+  document.getElementById('tab-regulatory').innerHTML = `
+    <div class="card">
+      <p class="label-mono">Recommended Regulatory Pathway</p>
+      <div style="font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--teal);margin-bottom:16px">${reg.recommended_pathway || '—'}</div>
+      <div class="reg-grid">
+        <div><div class="reg-item-label">Estimated Timeline</div><div class="reg-item-val">${reg.estimated_timeline_years || '—'}</div></div>
+        <div><div class="reg-item-label">Estimated Cost</div><div class="reg-item-val">${reg.estimated_cost_range || '—'}</div></div>
+      </div>
+      ${reg.special_designations.length > 0 ? `
+        <div style="margin-top:12px">
+          <div class="reg-item-label" style="margin-bottom:8px">Special Designations</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">${desigs}</div>
+        </div>` : ''}
+      <div class="reg-reasoning">
+        <div class="reg-item-label" style="margin-bottom:4px">Decision Audit Trail</div>
+        ${reasoning}
+      </div>
+    </div>`;
+}
+
+// ── Cost tab ──────────────────────────────────────────────────────────────────
+function renderCostTab(data) {
+  if (!data.cost_estimate) {
+    document.getElementById('tab-cost').innerHTML = `
+      <div class="card" style="text-align:center;padding:40px">
+        <p style="font-size:13px;color:var(--ink-3)">Cost estimate not available — backend model requires numpy.</p>
+      </div>`;
+    return;
+  }
+  const ce = data.cost_estimate;
+  const phases = (ce.phases || []).map(p => `
+    <div class="cost-phase">
+      <div class="cost-phase-name">${p.name}</div>
+      <div class="cost-phase-meta">
+        <span>Cost: $${(p.cost_low_usd/1e6).toFixed(0)}M – $${(p.cost_high_usd/1e6).toFixed(0)}M</span>
+        <span>Duration: ${p.years_low} – ${p.years_high} yrs</span>
+        ${p.notes ? `<span style="color:var(--ink-4)">${p.notes}</span>` : ''}
+      </div>
+    </div>`).join('');
+
+  document.getElementById('tab-cost').innerHTML = `
+    <div class="card">
+      <p class="label-mono">Development Cost & Timeline</p>
+      <div class="cost-summary-grid">
+        <div class="cost-summary-item">
+          <div class="cost-summary-val">$${(ce.cost_p50_usd/1e6).toFixed(0)}M</div>
+          <div class="cost-summary-label">P50 Cost</div>
+        </div>
+        <div class="cost-summary-item">
+          <div class="cost-summary-val">${ce.years_p50} yrs</div>
+          <div class="cost-summary-label">P50 Timeline</div>
+        </div>
+        <div class="cost-summary-item">
+          <div class="cost-summary-val">${ce.pathway}</div>
+          <div class="cost-summary-label">Pathway</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">
+        Range: $${(ce.total_cost_low_usd/1e6).toFixed(0)}M – $${(ce.total_cost_high_usd/1e6).toFixed(0)}M ·
+        P10: $${(ce.cost_p10_usd/1e6).toFixed(0)}M · P90: $${(ce.cost_p90_usd/1e6).toFixed(0)}M
+      </div>
+      ${phases}
+      ${ce.summary ? `<p style="font-size:12px;color:var(--ink-3);margin-top:14px;line-height:1.7">${ce.summary}</p>` : ''}
+    </div>`;
+}
+
+// ── IP tab ────────────────────────────────────────────────────────────────────
+function renderIPTab(data) {
+  const ob = data.scientific_evidence?.orange_book;
+  document.getElementById('tab-ip').innerHTML = `
+    <div class="card">
+      <p class="label-mono">IP &amp; Competitive Landscape</p>
+      <p style="font-size:13px;color:var(--ink-3);margin-bottom:12px">
+        IP crowding signal derived from FDA Orange Book comparable drug analysis.
+        ${ob ? `IP crowding score: <strong style="color:var(--ink)">${(ob.ip_crowding_score||0).toFixed(2)}</strong>` : ''}
+      </p>
+      <p style="font-size:12px;color:var(--ink-4);line-height:1.6">
+        For detailed freedom-to-operate analysis, consult a patent attorney and search USPTO PatentsView and Espacenet using the target gene name, relevant INN stems, and known scaffold chemotypes.
+      </p>
+    </div>`;
+}
+
+// ── Flags tab ─────────────────────────────────────────────────────────────────
+function renderFlagsTab(data) {
+  if (!data.flags || data.flags.length === 0) {
+    document.getElementById('tab-flags').innerHTML = `
+      <div class="card" style="text-align:center;padding:40px">
+        <p style="font-size:13px;color:var(--ink-3)">No risk flags detected.</p>
+      </div>`;
+    return;
+  }
+  const items = data.flags.map(f => `
+    <div class="flag-item">
+      <div>
+        <span class="flag-sev sev-${f.severity}">${f.severity}</span>
+        <div class="flag-type" style="margin-top:4px">${(f.type||'').replace(/_/g,' ')}</div>
+      </div>
+      <div>
+        <p class="flag-msg">${f.message}</p>
+      </div>
+    </div>`).join('');
+  document.getElementById('tab-flags').innerHTML = `<div class="card"><p class="label-mono" style="margin-bottom:14px">${data.flags.length} risk flag${data.flags.length !== 1 ? 's' : ''} detected</p>${items}</div>`;
+}
+
+// ── Data source bar ───────────────────────────────────────────────────────────
+function renderDataSourceBar(sources) {
+  const items = Object.entries(sources).map(([name, info]) => {
+    const cls = info.status === 'success' ? 'ds-success' : info.status === 'partial' ? 'ds-partial' : 'ds-failed';
+    return `<div class="datasource-item"><div class="ds-dot ${cls}"></div><span>${name.replace('_',' ')}</span><span class="ds-time">${info.query_time_ms}ms</span></div>`;
+  }).join('');
+  document.getElementById('datasource-bar').innerHTML = `<div class="datasource-title">Data sources</div><div class="datasource-items">${items}</div>`;
+}
+
+// ── Export JSON ───────────────────────────────────────────────────────────────
+function exportJSON() {
+  if (!currentData) return;
+  const json = JSON.stringify(currentData, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `pointme-${currentData.target.replace(/\s+/g,'_')}-${currentData.disease.replace(/\s+/g,'_')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Enter on inputs ───────────────────────────────────────────────────────────
+document.getElementById('disease-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleSubmit();
+});
+document.getElementById('target-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('disease-input').focus();
+});
+</script>
+</body>
+</html>

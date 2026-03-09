@@ -29,12 +29,16 @@ SCIENCE_WEIGHT  = 0.50
 REGULATORY_WEIGHT = 0.50
 
 # Recommendation thresholds (combined score 0-100)
-# CAUTION band was 40-64 — too wide. A score of 40 and 64 have very different outlooks.
-# Tightened: GO ≥ 65 (unchanged), CAUTION ≥ 45, NO-GO < 45.
-# With Phase III failure penalties now reaching -30+ pts, this ensures class-failed
-# targets cannot stay in low-CAUTION when their combined score is correctly suppressed.
-THRESHOLD_GO      = 65
-THRESHOLD_CAUTION = 45
+# 4-tier verdict system:
+#   GO               ≥ 65  — strong evidence, proceed
+#   MODERATE CAUTION 45–64 — promising but gaps exist, investigate before advancing
+#   CAUTION          20–44 — insufficient evidence / early-stage; not dangerous, just not ready
+#   NO-GO            < 20  — active harm signals or class-failed target; do not proceed
+#
+# NO-GO is reserved for truly catastrophic cases (e.g. BACE1 at 0.0).
+THRESHOLD_GO               = 65
+THRESHOLD_MODERATE_CAUTION = 45
+THRESHOLD_CAUTION          = 20
 # Below THRESHOLD_CAUTION → NO-GO
 
 

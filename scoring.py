@@ -17,7 +17,7 @@ from models import (
 from config import (
     SCIENCE_WEIGHTS, REGULATORY_WEIGHTS,
     SCIENCE_WEIGHT, REGULATORY_WEIGHT,
-    THRESHOLD_GO, THRESHOLD_CAUTION,
+    THRESHOLD_GO, THRESHOLD_MODERATE_CAUTION, THRESHOLD_CAUTION,
     SAFETY_ORGANS, EXPRESSION_SAFETY_THRESHOLD,
     PATHWAY_COMPLEXITY, DESIGNATION_SCORES,
 )
@@ -252,6 +252,8 @@ def compute_scores_full(
 
     if combined >= THRESHOLD_GO:
         recommendation = "GO"
+    elif combined >= THRESHOLD_MODERATE_CAUTION:
+        recommendation = "MODERATE CAUTION"
     elif combined >= THRESHOLD_CAUTION:
         recommendation = "CAUTION"
     else:

@@ -14,7 +14,7 @@ import { CostEstimatePanel } from './components/CostEstimatePanel'
 
 type ResultsTab = 'overview' | 'science' | 'regulatory' | 'cost' | 'ip' | 'flags'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
+const API_BASE = import.meta.env.VITE_API_URL ?? 'https://pointme-api.onrender.com'
 
 async function evaluateTarget(target: string, disease: string): Promise<PointMeResponse> {
   const res = await fetch(`${API_BASE}/evaluate`, {
@@ -137,7 +137,7 @@ export default function App() {
               <p className="text-nogo font-medium">Evaluation failed</p>
               <p className="text-sm text-ink-3">{error}</p>
               <p className="text-xs text-ink-4">
-                Make sure the backend is running at localhost:8001.
+                Connecting to {API_BASE}
               </p>
               <button onClick={handleReset} className="btn-primary mx-auto">
                 Try Again

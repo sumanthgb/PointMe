@@ -336,14 +336,14 @@ def fetch_patent_radar(
             ),
         )
 
-    # Assess relevance for top patents (cap LLM calls)
-    analyzed: list[DrugPatentResult] = []
-    for raw in raw_patents[:MAX_PATENTS_ANALYZE]:
+    # Assess relevance for top patents — run all LLM calls concurrently
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _assess_one(raw: dict) -> DrugPatentResult:
         relevance_data = _assess_relevance(raw, target, disease)
         active = _is_active(raw, relevance_data)
         relevance_enum = _map_relevance(relevance_data.get("relevance", "yellow"), active)
-
-        analyzed.append(DrugPatentResult(
+        result = DrugPatentResult(
             patent_number=raw.get("patent_number", "Unknown"),
             title=raw.get("title", "Unknown"),
             abstract=raw.get("abstract", ""),
@@ -354,8 +354,19 @@ def fetch_patent_radar(
             relevance=relevance_enum,
             relevance_explanation=relevance_data.get("explanation", ""),
             concerning_claims=relevance_data.get("concerning_claims", []),
-        ))
-        logger.info("  %s → %s (%s)", analyzed[-1].patent_number, analyzed[-1].relevance.value, analyzed[-1].assignee)
+        )
+        logger.info("  %s → %s (%s)", result.patent_number, result.relevance.value, result.assignee)
+        return result
+
+    to_analyze = raw_patents[:MAX_PATENTS_ANALYZE]
+    analyzed: list[DrugPatentResult] = []
+    with ThreadPoolExecutor(max_workers=min(len(to_analyze), 5)) as pool:
+        futures = [pool.submit(_assess_one, raw) for raw in to_analyze]
+        for future in as_completed(futures):
+            try:
+                analyzed.append(future.result())
+            except Exception as e:
+                logger.warning("Patent assessment future failed: %s", e)
 
     # Sort red → yellow → green
     sort_order = {PatentRelevance.RED: 0, PatentRelevance.YELLOW: 1, PatentRelevance.GREEN: 2}

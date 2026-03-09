@@ -62,7 +62,7 @@ export interface Scores {
   science_score: number
   regulatory_score: number
   combined_score: number
-  recommendation: 'GO' | 'CAUTION' | 'NO-GO'
+  recommendation: 'GO' | 'CAUTION' | 'MODERATE CAUTION' | 'NO-GO'
   confidence: ScoreConfidence | null
 }
 

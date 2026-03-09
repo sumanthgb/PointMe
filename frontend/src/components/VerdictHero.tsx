@@ -95,7 +95,9 @@ function AnimatedScore({ value, color }: { value: number; color: string }) {
 }
 
 export function VerdictHero({ data }: Props) {
-  const cfg = VERDICT_CONFIG[data.scores.recommendation]
+  const rec = data.scores.recommendation
+  const normalizedRec = rec === 'MODERATE CAUTION' ? 'CAUTION' : rec
+  const cfg = VERDICT_CONFIG[normalizedRec as keyof typeof VERDICT_CONFIG] ?? VERDICT_CONFIG['CAUTION']
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {

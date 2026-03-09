@@ -51,9 +51,6 @@ REGULATORY ASSESSMENT:
 DEVELOPMENT COST & TIMELINE MODEL:
 {cost_estimate}
 
-PATENT LANDSCAPE:
-{patent_radar}
-
 CROSS-REFERENCE FLAGS ({flag_count} total):
 {flags}
 
@@ -65,9 +62,8 @@ Structure your response EXACTLY as follows:
 2. SCIENTIFIC EVIDENCE ASSESSMENT (genetic evidence, clinical trial landscape, literature)
 3. REGULATORY PATHWAY ANALYSIS (recommended pathway, why, special designations, timeline)
 4. DEVELOPMENT COST & TIMELINE (out-of-pocket estimate ranges, MC P50, key phases)
-5. IP LANDSCAPE (patent density, key risks, recommended action)
-6. CRITICAL RISK FLAGS (list and explain each flag, starting with most severe)
-7. CONFIDENCE NOTE (note any data gaps or failed sources that limit confidence)
+5. CRITICAL RISK FLAGS (list and explain each flag, starting with most severe)
+6. CONFIDENCE NOTE (note any data gaps or failed sources that limit confidence)
 """
 
 
@@ -123,16 +119,6 @@ def synthesize_with_llm(response: TargetIQResponse) -> str:
             )
         )
 
-    # Format patent radar section
-    patent_radar_text = "Not available."
-    if response.patent_radar:
-        pr = response.patent_radar
-        patent_radar_text = (
-            f"{len(pr.patents)} patents analyzed | "
-            f"High-risk (red): {pr.red_count} | Moderate (yellow): {pr.yellow_count}\n"
-            f"Summary: {pr.summary}"
-        )
-
     prompt = SYNTHESIS_USER_TEMPLATE.format(
         target=response.target,
         disease=response.disease,
@@ -147,7 +133,6 @@ def synthesize_with_llm(response: TargetIQResponse) -> str:
         cost=reg.estimated_cost_range or "Unknown",
         reasoning="\n".join(f"  - {r}" for r in reg.reasoning),
         cost_estimate=cost_estimate_text,
-        patent_radar=patent_radar_text,
         flag_count=len(response.flags),
         flags=_format_flags(response.flags),
         data_sources=_format_data_sources(response.data_sources),
@@ -184,14 +169,6 @@ def synthesize_with_openai_fallback(response: TargetIQResponse) -> str:
                 f"P50: ${ce.cost_p50_usd // 1_000_000}M | "
                 f"Timeline: {ce.total_years_low}–{ce.total_years_high} years (P50: {ce.years_p50} yrs)"
             )
-        patent_radar_text = "Not available."
-        if response.patent_radar:
-            pr = response.patent_radar
-            patent_radar_text = (
-                f"{len(pr.patents)} patents | Red: {pr.red_count} | Yellow: {pr.yellow_count}\n"
-                f"Summary: {pr.summary}"
-            )
-
         prompt = SYNTHESIS_USER_TEMPLATE.format(
             target=response.target,
             disease=response.disease,
@@ -206,7 +183,6 @@ def synthesize_with_openai_fallback(response: TargetIQResponse) -> str:
             cost=reg.estimated_cost_range or "Unknown",
             reasoning="\n".join(f"  - {r}" for r in reg.reasoning),
             cost_estimate=cost_estimate_text,
-            patent_radar=patent_radar_text,
             flag_count=len(response.flags),
             flags=_format_flags(response.flags),
             data_sources=_format_data_sources(response.data_sources),

@@ -118,6 +118,56 @@ export interface DataSources {
   }
 }
 
+export interface DevelopmentPhase {
+  name: string
+  cost_low_usd: number
+  cost_high_usd: number
+  years_low: number
+  years_high: number
+  notes: string | null
+}
+
+export interface DevelopmentCostEstimate {
+  pathway: string
+  phases: DevelopmentPhase[]
+  total_cost_low_usd: number
+  total_cost_high_usd: number
+  total_years_low: number
+  total_years_high: number
+  cost_p10_usd: number
+  cost_p50_usd: number
+  cost_p90_usd: number
+  years_p10: number
+  years_p50: number
+  years_p90: number
+  designations_applied: string[]
+  summary: string
+}
+
+export type PatentRelevance = 'green' | 'yellow' | 'red'
+
+export interface DrugPatentResult {
+  patent_number: string
+  title: string
+  abstract: string
+  assignee: string
+  filing_date: string
+  expiration_date: string | null
+  is_active: boolean
+  relevance: PatentRelevance
+  relevance_explanation: string
+  concerning_claims: string[]
+}
+
+export interface PatentRadarResult {
+  patents: DrugPatentResult[]
+  search_queries_used: string[]
+  red_count: number
+  yellow_count: number
+  summary: string
+  disclaimer: string
+}
+
 export interface PointMeResponse {
   target: string
   disease: string
@@ -127,6 +177,8 @@ export interface PointMeResponse {
   flags: CrossReferenceFlag[]
   llm_synthesis: string | null
   data_sources: DataSources
+  cost_estimate: DevelopmentCostEstimate | null
+  patent_radar: PatentRadarResult | null
 }
 
 export type AppState = 'idle' | 'loading' | 'results' | 'error'

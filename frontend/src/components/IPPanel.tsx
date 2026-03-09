@@ -1,5 +1,5 @@
-import { ShieldCheck, Lock, ExternalLink, AlertTriangle } from 'lucide-react'
-import type { PointMeResponse } from '../types'
+import { ShieldCheck, Lock, ExternalLink, AlertTriangle, Shield } from 'lucide-react'
+import type { PointMeResponse, DrugPatentResult } from '../types'
 
 interface Props {
   data: PointMeResponse
@@ -77,6 +77,55 @@ export function IPPanel({ data }: Props) {
         </p>
       </div>
 
+      {/* Patent radar */}
+      {data.patent_radar && (
+        <div className="card space-y-4">
+          <div className="flex items-center gap-2">
+            <Shield size={14} className="text-ink-2" />
+            <p className="label-mono">Patent radar — USPTO PatentsView scan</p>
+            <a href="https://patentsview.org" target="_blank" rel="noopener noreferrer" className="source-chip ml-auto">
+              PatentsView <ExternalLink size={9} />
+            </a>
+          </div>
+
+          {/* Traffic light summary */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-nogo-light border border-nogo-border rounded-lg p-2 text-center">
+              <p className="font-mono text-lg font-bold text-nogo">{data.patent_radar.red_count}</p>
+              <p className="text-[10px] text-nogo font-mono uppercase tracking-wide">High risk</p>
+            </div>
+            <div className="bg-caution-light border border-caution-border rounded-lg p-2 text-center">
+              <p className="font-mono text-lg font-bold text-caution">{data.patent_radar.yellow_count}</p>
+              <p className="text-[10px] text-caution font-mono uppercase tracking-wide">Review needed</p>
+            </div>
+            <div className="bg-go-light border border-go-border rounded-lg p-2 text-center">
+              <p className="font-mono text-lg font-bold text-go">
+                {data.patent_radar.patents.length - data.patent_radar.red_count - data.patent_radar.yellow_count}
+              </p>
+              <p className="text-[10px] text-go font-mono uppercase tracking-wide">Low concern</p>
+            </div>
+          </div>
+
+          {/* LLM summary */}
+          <p className="text-sm text-ink-2 leading-relaxed">{data.patent_radar.summary}</p>
+
+          {/* Individual patents */}
+          {data.patent_radar.patents.length > 0 && (
+            <div className="space-y-2">
+              <p className="label-mono">Patents analyzed</p>
+              {data.patent_radar.patents.map((patent, idx) => (
+                <PatentCard key={idx} patent={patent} />
+              ))}
+            </div>
+          )}
+
+          {/* Disclaimer */}
+          <p className="text-xs text-ink-4 italic border-t border-border pt-3">
+            {data.patent_radar.disclaimer}
+          </p>
+        </div>
+      )}
+
       {/* Privacy & security */}
       <div className="card space-y-3">
         <div className="flex items-center gap-2">
@@ -137,6 +186,52 @@ export function IPPanel({ data }: Props) {
           </ul>
         </div>
       </div>
+    </div>
+  )
+}
+
+function PatentCard({ patent }: { patent: DrugPatentResult }) {
+  const relevanceConfig = {
+    red: { color: '#C1292E', bg: 'rgba(193,41,46,0.06)', border: 'rgba(193,41,46,0.25)', label: 'HIGH RISK' },
+    yellow: { color: '#D4930D', bg: 'rgba(212,147,13,0.06)', border: 'rgba(212,147,13,0.25)', label: 'REVIEW' },
+    green: { color: '#2D936C', bg: 'rgba(45,147,108,0.06)', border: 'rgba(45,147,108,0.25)', label: 'LOW RISK' },
+  }
+  const cfg = relevanceConfig[patent.relevance]
+
+  return (
+    <div className="rounded-lg border p-3 space-y-1.5" style={{ background: cfg.bg, borderColor: cfg.border }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded"
+              style={{ color: cfg.color, background: cfg.color + '18' }}
+            >
+              {cfg.label}
+            </span>
+            {!patent.is_active && (
+              <span className="text-[10px] font-mono text-ink-4 bg-surface-3 border border-border px-1.5 py-0.5 rounded">
+                EXPIRED
+              </span>
+            )}
+            <span className="text-xs font-mono text-ink-4">{patent.patent_number}</span>
+          </div>
+          <p className="text-xs font-medium text-ink mt-1 leading-tight">{patent.title}</p>
+        </div>
+      </div>
+      <p className="text-xs text-ink-3 leading-relaxed">{patent.relevance_explanation}</p>
+      <div className="flex items-center gap-3 text-[10px] text-ink-4 font-mono">
+        <span>{patent.assignee}</span>
+        {patent.filing_date && <span>Filed: {patent.filing_date.slice(0, 4)}</span>}
+        {patent.expiration_date && <span>Expires ~{patent.expiration_date.slice(0, 4)}</span>}
+      </div>
+      {patent.concerning_claims.length > 0 && (
+        <div className="space-y-0.5 pt-1">
+          {patent.concerning_claims.slice(0, 2).map((claim, i) => (
+            <p key={i} className="text-[10px] text-ink-3 font-mono">⚠ {claim}</p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -10,8 +10,9 @@ import { RiskFlags } from './components/RiskFlags'
 import { LLMSynthesis } from './components/LLMSynthesis'
 import { DataSourceBar } from './components/DataSourceBar'
 import { IPPanel } from './components/IPPanel'
+import { CostEstimatePanel } from './components/CostEstimatePanel'
 
-type ResultsTab = 'overview' | 'science' | 'regulatory' | 'ip' | 'flags'
+type ResultsTab = 'overview' | 'science' | 'regulatory' | 'cost' | 'ip' | 'flags'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -175,6 +176,7 @@ export default function App() {
                     { id: 'overview', label: 'Overview' },
                     { id: 'science', label: 'Scientific Evidence' },
                     { id: 'regulatory', label: 'Regulatory Pathway' },
+                    { id: 'cost', label: 'Development Cost' },
                     { id: 'ip', label: 'IP & Privacy' },
                     { id: 'flags', label: `Risk Flags${data.flags.length > 0 ? ` (${data.flags.length})` : ''}` },
                   ] as Array<{ id: ResultsTab; label: string }>
@@ -199,6 +201,11 @@ export default function App() {
               {activeTab === 'overview' && <OverviewTab data={data} onTabChange={setActiveTab} />}
               {activeTab === 'science' && <EvidenceTabs evidence={data.scientific_evidence} />}
               {activeTab === 'regulatory' && <RegulatoryTree assessment={data.regulatory_assessment} />}
+              {activeTab === 'cost' && (
+                data.cost_estimate
+                  ? <CostEstimatePanel estimate={data.cost_estimate} />
+                  : <div className="card text-center py-8 text-sm text-ink-3">Cost estimate not available — backend model requires numpy.</div>
+              )}
               {activeTab === 'ip' && <IPPanel data={data} />}
               {activeTab === 'flags' && <RiskFlags flags={data.flags} />}
             </div>

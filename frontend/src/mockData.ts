@@ -139,6 +139,8 @@ All 6 data sources returned successfully. Confidence: High. A full patent landsc
     fda_drugs: { status: 'success', query_time_ms: 503 },
     orange_book: { status: 'partial', query_time_ms: 341 },
   },
+  cost_estimate: null,
+  patent_radar: null,
 }
 
 export const MOCK_BACE1: PointMeResponse = {
@@ -311,6 +313,8 @@ All 6 data sources returned successfully. Confidence: High. The weight of eviden
     fda_drugs: { status: 'success', query_time_ms: 456 },
     orange_book: { status: 'success', query_time_ms: 298 },
   },
+  cost_estimate: null,
+  patent_radar: null,
 }
 
 export const DEMO_PRESETS = [

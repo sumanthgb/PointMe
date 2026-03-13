@@ -55,33 +55,44 @@ def fetch_orange_book(target: str, disease: str) -> OrangeBookResult:
     search_term = target.split()[0].lower()
 
     try:
-        import httpx
-        with httpx.Client(timeout=30) as client:
-            resp = client.get(BASE_URL, params={
-                "search": f'products.active_ingredients.name:"{search_term}"',
-                "limit": 20,
-            })
+        import urllib.request
+        import urllib.parse
+        import json
 
-            if resp.status_code == 404:
-                resp = client.get(BASE_URL, params={
-                    "search": f'products.brand_name:"{search_term}"',
-                    "limit": 20,
-                })
+        # Try active ingredient name first
+        params = {"search": f'products.active_ingredients.name:"{search_term}"', "limit": 20}
+        query_string = urllib.parse.urlencode(params)
+        url = f"{BASE_URL}?{query_string}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
 
-            if resp.status_code == 404:
-                return OrangeBookResult(
-                    meta=WorkerMeta(
-                        status=WorkerStatus.PARTIAL,
-                        query_time_ms=int((time.time() - start) * 1000),
-                        error=f"No Orange Book records found for '{search_term}'"
-                    )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                all_results = data.get("results", [])
+        except Exception:
+            # Try brand name fallback
+            params = {"search": f'products.brand_name:"{search_term}"', "limit": 20}
+            query_string = urllib.parse.urlencode(params)
+            url = f"{BASE_URL}?{query_string}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    all_results = data.get("results", [])
+            except Exception:
+                all_results = []
+
+        if not all_results:
+            return OrangeBookResult(
+                meta=WorkerMeta(
+                    status=WorkerStatus.PARTIAL,
+                    query_time_ms=int((time.time() - start) * 1000),
+                    error=f"No Orange Book records found for '{search_term}'"
                 )
-
-            resp.raise_for_status()
-            data = resp.json()
+            )
 
         comparable_drugs = []
-        for result in data.get("results", []):
+        for result in all_results:
             for product in result.get("products", []):
                 active_ingredients = product.get("active_ingredients", [{}])
                 name = active_ingredients[0].get("name", "Unknown") if active_ingredients else "Unknown"
@@ -89,7 +100,7 @@ def fetch_orange_book(target: str, disease: str) -> OrangeBookResult:
                 comparable_drugs.append(ComparableDrug(
                     name=name,
                     exclusivity_type=product.get("te_code"),
-                    exclusivity_expiration=None,  # not in drugsfda endpoint; use download for this
+                    exclusivity_expiration=None,
                     patent_number=None,
                     patent_expiration=None,
                 ))
@@ -98,7 +109,7 @@ def fetch_orange_book(target: str, disease: str) -> OrangeBookResult:
         seen = set()
         deduped = []
         for d in comparable_drugs:
-            if d.name not in seen:
+            if d.name not in seen and d.name != "Unknown":
                 deduped.append(d)
                 seen.add(d.name)
 
@@ -121,19 +132,54 @@ def fetch_orange_book(target: str, disease: str) -> OrangeBookResult:
         )
 
 
-# ---------------------------------------------------------------------------
-# UPGRADE PATH: Download-based Orange Book (more reliable for patent/exclusivity)
-# ---------------------------------------------------------------------------
-# If you need real exclusivity expiration dates, use the flat files:
-#
-# import urllib.request, zipfile, io, csv
-#
-# def fetch_orange_book_from_download(target: str) -> OrangeBookResult:
-#     url = "https://www.fda.gov/media/76860/download"
-#     with urllib.request.urlopen(url) as r:
-#         zf = zipfile.ZipFile(io.BytesIO(r.read()))
-#         with zf.open("products.txt") as f:
-#             reader = csv.DictReader(io.TextIOWrapper(f), delimiter="~")
-#             for row in reader:
-#                 if target.lower() in row.get("Ingredient", "").lower():
-#                     ...  # parse patent/exclusivity fields
+def supplement_with_drug_names(ob_result: OrangeBookResult, drug_names: list[str]) -> OrangeBookResult:
+    """
+    Search Orange Book by known drug names to supplement the gene-based search.
+    """
+    if not drug_names or ob_result.meta.status == WorkerStatus.FAILED:
+        return ob_result
+
+    import urllib.request
+    import urllib.parse
+    import json
+
+    seen_names: set[str] = {d.name for d in ob_result.comparable_drugs}
+    extra_drugs: list[ComparableDrug] = []
+
+    try:
+        for drug in drug_names[:10]:
+            params = {"search": f'products.active_ingredients.name:"{drug}"', "limit": 10}
+            query_string = urllib.parse.urlencode(params)
+            url = f"{BASE_URL}?{query_string}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    results = data.get("results", [])
+            except Exception:
+                continue
+
+            for result in results:
+                for product in result.get("products", []):
+                    active_ingredients = product.get("active_ingredients", [{}])
+                    name = active_ingredients[0].get("name", "Unknown") if active_ingredients else "Unknown"
+                    if name in seen_names or name == "Unknown":
+                        continue
+                    seen_names.add(name)
+                    extra_drugs.append(ComparableDrug(
+                        name=name,
+                        exclusivity_type=product.get("te_code"),
+                        exclusivity_expiration=None,
+                        patent_number=None,
+                        patent_expiration=None,
+                    ))
+    except Exception:
+        pass
+
+    merged = ob_result.comparable_drugs + extra_drugs
+    return OrangeBookResult(
+        comparable_drugs=merged,
+        ip_crowding_score=_compute_ip_crowding_score(merged),
+        meta=ob_result.meta,
+    )

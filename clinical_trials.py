@@ -72,11 +72,16 @@ def fetch_clinical_trials(target: str, disease: str) -> ClinicalTrialsResult:
             ),
         }
 
-        import httpx
-        with httpx.Client(timeout=30) as client:
-            resp = client.get(BASE_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+        import urllib.request
+        import urllib.parse
+        import json
+        
+        query_string = urllib.parse.urlencode(params)
+        url = f"{BASE_URL}?{query_string}"
+        
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
 
         studies = data.get("studies", [])
 
@@ -148,7 +153,9 @@ def supplement_with_drug_names(
     if not drug_names or ct_result.meta.status == WorkerStatus.FAILED:
         return ct_result
 
-    import httpx
+    import urllib.request
+    import urllib.parse
+    import json
 
     seen_ids: set[str] = {t.nct_id for t in (
         ct_result.active_trials + ct_result.completed_trials + ct_result.failed_trials
@@ -160,21 +167,28 @@ def supplement_with_drug_names(
     phase_counts = dict(ct_result.phases)
 
     try:
-        with httpx.Client(timeout=30) as client:
-            for drug in drug_names[:10]:  # cap to avoid too many requests
-                resp = client.get(BASE_URL, params={
-                    "query.cond": disease,
-                    "query.intr": drug,
-                    "pageSize": 20,
-                    "format": "json",
-                    "fields": (
-                        "NCTId,BriefTitle,OverallStatus,WhyStopped,"
-                        "Phase,EnrollmentCount,StartDate,PrimaryOutcomeMeasure"
-                    ),
-                })
-                if resp.status_code != 200:
-                    continue
-                for study in resp.json().get("studies", []):
+        for drug in drug_names[:10]:  # cap to avoid too many requests
+            params = {
+                "query.cond": disease,
+                "query.intr": drug,
+                "pageSize": 20,
+                "format": "json",
+                "fields": (
+                    "NCTId,BriefTitle,OverallStatus,WhyStopped,"
+                    "Phase,EnrollmentCount,StartDate,PrimaryOutcomeMeasure"
+                ),
+            }
+            query_string = urllib.parse.urlencode(params)
+            url = f"{BASE_URL}?{query_string}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+            except Exception:
+                continue
+                
+            for study in data.get("studies", []):
                     trial = _parse_trial(study)
                     if trial.nct_id in seen_ids:
                         continue

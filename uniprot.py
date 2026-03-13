@@ -35,35 +35,101 @@ FIELDS = ",".join([
 def _parse_expression(comments: list[dict]) -> list[TissueExpression]:
     """
     Parse UniProt tissue specificity comments into TissueExpression list.
-    UniProt encodes this as free-text comments — we do keyword extraction.
+    
+    UniProt encodes this as free-text like:
+      "Expressed at high levels in the brain and pancreas."
+      "Widely expressed. Highest expression in liver and kidney."
+    
+    Strategy: split on sentences, find tissue keywords, infer level from context.
     """
+    import re
+
+    # Known tissues/organs to scan for
+    KNOWN_TISSUES = [
+        "brain", "liver", "kidney", "heart", "lung", "pancreas", "spleen",
+        "intestine", "colon", "stomach", "skin", "bone marrow", "thymus",
+        "lymph node", "testis", "ovary", "uterus", "prostate", "breast",
+        "muscle", "skeletal muscle", "adipose", "adrenal", "thyroid",
+        "pituitary", "placenta", "retina", "cornea", "blood", "plasma",
+        "serum", "platelet", "leukocyte", "lymphocyte", "monocyte",
+        "neutrophil", "macrophage", "fibroblast", "endothelial",
+        "substantia nigra", "hippocampus", "cortex", "cerebellum",
+        "spinal cord", "trachea", "esophagus", "bladder", "eye",
+        "salivary gland", "gallbladder", "small intestine", "appendix",
+        "bone", "cartilage", "nerve", "dorsal root ganglia",
+        "locus coeruleus", "medulla oblongata",
+    ]
+
+    # Words that indicate expression level
+    HIGH_WORDS = {"high", "highest", "highly", "strongly", "predominantly", "abundant", "abundantly", "enriched", "ubiquitous", "ubiquitously", "widely"}
+    LOW_WORDS = {"low", "lowest", "weakly", "faint", "faintly", "barely", "minor", "trace"}
+    MEDIUM_WORDS = {"moderate", "moderately", "intermediate"}
+    NOT_DETECTED_WORDS = {"not detected", "absent", "undetectable", "not expressed", "no expression"}
+
     expressions = []
+    seen_tissues: set[str] = set()
+
     for comment in comments:
         if comment.get("commentType") != "TISSUE SPECIFICITY":
             continue
         texts = comment.get("texts", [])
         for text_obj in texts:
             value = text_obj.get("value", "")
-            # Simple heuristic: split on periods and semicolons, look for tissue + level
-            for level in ["High", "Medium", "Low", "Not detected"]:
-                if level.lower() in value.lower():
-                    # Try to extract tissue name — look for patterns like "Highly expressed in X"
-                    # This is a rough parse; for production use a NLP approach
-                    import re
-                    patterns = [
-                        rf"(?:expressed|expression)\s+in\s+([a-zA-Z\s]+?)(?:\.|;|,|$)",
-                        rf"([a-zA-Z\s]+?)\s+(?:express|shows?\s+{level})",
-                    ]
-                    for pat in patterns:
-                        matches = re.findall(pat, value, re.IGNORECASE)
-                        for match in matches[:3]:  # cap at 3 per comment
-                            tissue = match.strip().lower()
-                            if len(tissue) > 2:
-                                expressions.append(TissueExpression(
-                                    tissue=tissue,
-                                    level=level,
-                                    level_numeric=EXPRESSION_LEVEL_MAP.get(level, 0.0)
-                                ))
+            if not value:
+                continue
+
+            value_lower = value.lower()
+
+            # Determine the "default" level for the whole block
+            # e.g. "Expressed at high levels in the brain and pancreas" → default is High
+            default_level = "Medium"  # fallback
+            if any(w in value_lower for w in NOT_DETECTED_WORDS):
+                default_level = "Not detected"
+            elif any(w in value_lower for w in HIGH_WORDS):
+                default_level = "High"
+            elif any(w in value_lower for w in LOW_WORDS):
+                default_level = "Low"
+            elif any(w in value_lower for w in MEDIUM_WORDS):
+                default_level = "Medium"
+
+            # Split into sentences for finer-grained analysis
+            sentences = re.split(r'[.;]', value)
+
+            for sentence in sentences:
+                sentence_lower = sentence.lower().strip()
+                if not sentence_lower:
+                    continue
+
+                # Determine sentence-level expression level
+                sent_level = default_level
+                if any(w in sentence_lower for w in NOT_DETECTED_WORDS):
+                    sent_level = "Not detected"
+                elif any(w in sentence_lower for w in HIGH_WORDS):
+                    sent_level = "High"
+                elif any(w in sentence_lower for w in LOW_WORDS):
+                    sent_level = "Low"
+                elif any(w in sentence_lower for w in MEDIUM_WORDS):
+                    sent_level = "Medium"
+
+                # Find all tissue mentions in this sentence
+                for tissue in KNOWN_TISSUES:
+                    if tissue in sentence_lower and tissue not in seen_tissues:
+                        seen_tissues.add(tissue)
+                        expressions.append(TissueExpression(
+                            tissue=tissue,
+                            level=sent_level,
+                            level_numeric=EXPRESSION_LEVEL_MAP.get(sent_level, 0.0)
+                        ))
+
+            # If text mentions "widely expressed" or "ubiquitous" but we found no specific tissues,
+            # add a generic "ubiquitous" entry
+            if not expressions and ("widely" in value_lower or "ubiquitous" in value_lower):
+                expressions.append(TissueExpression(
+                    tissue="ubiquitous",
+                    level="Medium",
+                    level_numeric=0.6
+                ))
+
     return expressions
 
 
@@ -78,6 +144,75 @@ def _parse_diseases(comments: list[dict]) -> list[str]:
         if name:
             diseases.append(name)
     return diseases
+
+
+def _fetch_hpa_expression(gene_name: str) -> list[TissueExpression]:
+    """
+    Fallback: fetch tissue RNA expression from Human Protein Atlas.
+    Returns TissueExpression list based on nTPM values.
+    
+    HPA levels:  nTPM >= 20 → High,  5-20 → Medium,  1-5 → Low,  <1 → Not detected
+    """
+    import urllib.request
+    import urllib.parse
+    import json
+    
+    # Key safety-relevant tissues
+    HPA_TISSUES = [
+        "brain", "liver", "kidney", "lung", "heart+muscle",
+        "pancreas", "colon", "stomach", "skin", "bone+marrow",
+        "spleen", "testis", "thyroid", "adrenal+gland",
+    ]
+    
+    columns = "g," + ",".join(f"t_RNA_{t}" for t in HPA_TISSUES)
+    
+    try:
+        params = urllib.parse.urlencode({
+            "search": gene_name,
+            "format": "json",
+            "columns": columns,
+            "compress": "no",
+        })
+        url = f"https://www.proteinatlas.org/api/search_download.php?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = json.loads(response.read().decode())
+    except Exception:
+        return []
+    
+    if not data:
+        return []
+    
+    entry = data[0]
+    expressions = []
+    
+    for key, value in entry.items():
+        if key == "Gene" or not value:
+            continue
+        # Key format: "Tissue RNA - liver [nTPM]"
+        tissue_name = key.replace("Tissue RNA - ", "").replace(" [nTPM]", "").replace("+", " ").strip().lower()
+        
+        try:
+            ntpm = float(value)
+        except (ValueError, TypeError):
+            continue
+        
+        if ntpm >= 20:
+            level = "High"
+        elif ntpm >= 5:
+            level = "Medium"
+        elif ntpm >= 1:
+            level = "Low"
+        else:
+            level = "Not detected"
+        
+        expressions.append(TissueExpression(
+            tissue=tissue_name,
+            level=level,
+            level_numeric=EXPRESSION_LEVEL_MAP.get(level, 0.0)
+        ))
+    
+    return expressions
 
 
 def fetch_uniprot(target: str, disease: str) -> UniProtResult:
@@ -142,6 +277,19 @@ def fetch_uniprot(target: str, disease: str) -> UniProtResult:
 
         # Tissue expression
         tissue_expression = _parse_expression(comments)
+
+        # Supplement with Human Protein Atlas data to fill tissue gaps.
+        # If UniProt returned 0 tissues, HPA becomes the primary source.
+        # If UniProt returned some, HPA fills in missing tissues (e.g. BACE1 liver).
+        try:
+            hpa_tissues = _fetch_hpa_expression(gene_name)
+            if hpa_tissues:
+                existing_names = {t.tissue for t in tissue_expression}
+                for hpa_t in hpa_tissues:
+                    if hpa_t.tissue not in existing_names:
+                        tissue_expression.append(hpa_t)
+        except Exception:
+            pass  # HPA is best-effort
 
         # Disease associations
         disease_associations = _parse_diseases(comments)

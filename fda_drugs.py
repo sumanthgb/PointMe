@@ -59,36 +59,46 @@ def fetch_fda_drugs(target: str, disease: str) -> FDADrugsResult:
     search_term = target.split()[0].lower()
 
     try:
-        import httpx
-        with httpx.Client(timeout=30) as client:
+        import urllib.request
+        import urllib.parse
+        import json
+        
+        # 1. First try active ingredient name
+        params = {"search": f'products.active_ingredients.name:"{search_term}"', "limit": 50}
+        query_string = urllib.parse.urlencode(params)
+        url = f"{BASE_URL}?{query_string}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                all_results = data.get("results", [])
+        except Exception:
+            # 2. If 404, try brand name
+            params = {"search": f'products.brand_name:"{search_term}"', "limit": 50}
+            query_string = urllib.parse.urlencode(params)
+            url = f"{BASE_URL}?{query_string}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    all_results = data.get("results", [])
+            except Exception:
+                all_results = []
 
-            resp = client.get(BASE_URL, params={
-                "search": f'products.active_ingredients.name:"{search_term}"',
-                "limit": 50,
-            })
-
-            if resp.status_code == 404:
-                resp = client.get(BASE_URL, params={
-                    "search": f'products.brand_name:"{search_term}"',
-                    "limit": 50,
-                })
-
-            if resp.status_code == 404:
-                return FDADrugsResult(
-                    meta=WorkerMeta(
-                        status=WorkerStatus.PARTIAL,
-                        query_time_ms=int((time.time() - start) * 1000),
-                        error=f"No FDA drug records found for '{search_term}'"
-                    )
+        if not all_results:
+            return FDADrugsResult(
+                meta=WorkerMeta(
+                    status=WorkerStatus.PARTIAL,
+                    query_time_ms=int((time.time() - start) * 1000),
+                    error=f"No FDA drug records found for '{search_term}'"
                 )
-
-            resp.raise_for_status()
-            data = resp.json()
+            )
 
         approved_drugs = []
         rejected_drugs = []
 
-        for result in data.get("results", []):
+        for result in all_results:
             for submission in result.get("submissions", []):
                 action = submission.get("submission_status", "").upper()
                 for product in result.get("products", []):
@@ -102,16 +112,11 @@ def fetch_fda_drugs(target: str, disease: str) -> FDADrugsResult:
         seen = set()
         deduped_approved = []
         for d in approved_drugs:
-            if d.name not in seen:
+            if d.name not in seen and d.name != "Unknown":
                 deduped_approved.append(d)
                 seen.add(d.name)
 
-        # FIX: approved_drugs_same_moa was incorrectly set to deduped_approved[:5],
-        # which would wrongly trigger 505(b)(2) pathway for any target that has
-        # *any* approved drug, regardless of mechanism. The openFDA endpoint does
-        # not return mechanism-of-action data, so we cannot determine same-MOA here.
-        # Setting to [] correctly defaults the regulatory engine to 505(b)(1).
-        # Aparna can populate this with manual MOA lookups if needed for the demo.
+        # We leave this empty because openFDA doesn't give us MOA reliably
         approved_drugs_same_moa = []
 
         elapsed = int((time.time() - start) * 1000)
@@ -130,3 +135,56 @@ def fetch_fda_drugs(target: str, disease: str) -> FDADrugsResult:
                 error=str(e)
             )
         )
+
+def supplement_with_drug_names(fda_result: FDADrugsResult, drug_names: list[str]) -> FDADrugsResult:
+    """
+    Search FDA by known drug names to supplement the gene-based search.
+    """
+    if not drug_names or fda_result.meta.status == WorkerStatus.FAILED:
+        return fda_result
+
+    import urllib.request
+    import urllib.parse
+    import json
+    
+    seen_names: set[str] = {d.name for d in fda_result.approved_drugs + fda_result.rejected_drugs}
+    
+    appr_extra: list[FDADrug] = []
+    rej_extra: list[FDADrug] = []
+
+    try:
+        for drug in drug_names[:10]:
+            params = {"search": f'products.active_ingredients.name:"{drug}"', "limit": 10}
+            query_string = urllib.parse.urlencode(params)
+            url = f"{BASE_URL}?{query_string}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    results = data.get("results", [])
+            except Exception:
+                continue
+                
+            for result in results:
+                for submission in result.get("submissions", []):
+                    action = submission.get("submission_status", "").upper()
+                    for product in result.get("products", []):
+                        parsed_drug = _parse_drug(product, submission)
+                        if parsed_drug.name in seen_names or parsed_drug.name == "Unknown":
+                            continue
+                        seen_names.add(parsed_drug.name)
+                        
+                        if action in APPROVED_ACTIONS:
+                            appr_extra.append(parsed_drug)
+                        elif action in REJECTED_ACTIONS:
+                            rej_extra.append(parsed_drug)
+    except Exception:
+        pass
+        
+    return FDADrugsResult(
+        approved_drugs=fda_result.approved_drugs + appr_extra,
+        rejected_drugs=fda_result.rejected_drugs + rej_extra,
+        approved_drugs_same_moa=fda_result.approved_drugs_same_moa,
+        meta=fda_result.meta
+    )

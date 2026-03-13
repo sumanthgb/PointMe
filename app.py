@@ -128,11 +128,22 @@ async def orchestrate(target: str, disease: str) -> dict:
     # STEP 1: All 6 workers in parallel
     ot, ct, pm, up, fda, ob = await _run_all_workers(target, disease)
 
-    # STEP 1b: Supplement ClinicalTrials with drug-name searches from Open Targets.
+    # STEP 1b: Supplement ClinicalTrials, FDA & Orange Book with drug-name searches from Open Targets.
     # Gene-name searches miss trials filed under drug trade names (e.g. BACE1 → verubecestat).
     if ot.known_drugs:
         drug_names = [d.drug_name for d in ot.known_drugs]
-        ct = await _run_in_thread(supplement_with_drug_names, ct, drug_names, disease)
+        from fda_drugs import supplement_with_drug_names as fda_supplement
+        from orange_book import supplement_with_drug_names as ob_supplement
+        
+        # Run all supplements in parallel
+        ct_task = _run_in_thread(supplement_with_drug_names, ct, drug_names, disease)
+        fda_task = _run_in_thread(fda_supplement, fda, drug_names)
+        ob_task = _run_in_thread(ob_supplement, ob, drug_names)
+        
+        results = await asyncio.gather(ct_task, fda_task, ob_task, return_exceptions=True)
+        ct = results[0] if not isinstance(results[0], Exception) else ct
+        fda = results[1] if not isinstance(results[1], Exception) else fda
+        ob = results[2] if not isinstance(results[2], Exception) else ob
 
     # STEP 2: Regulatory rules engine
     reg = determine_regulatory_pathway(

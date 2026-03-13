@@ -185,6 +185,6 @@ def supplement_with_drug_names(fda_result: FDADrugsResult, drug_names: list[str]
     return FDADrugsResult(
         approved_drugs=fda_result.approved_drugs + appr_extra,
         rejected_drugs=fda_result.rejected_drugs + rej_extra,
-        approved_drugs_same_moa=fda_result.approved_drugs_same_moa,
+        approved_drugs_same_moa=fda_result.approved_drugs_same_moa + appr_extra,
         meta=fda_result.meta
     )

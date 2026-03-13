@@ -47,11 +47,18 @@ def cross_reference(
     flags: list[CrossReferenceFlag] = []
 
     # -------------------------------------------------------------------
+    # ESTABLISHED TARGET VALIDATION
+    # -------------------------------------------------------------------
+    has_approved_drugs = len(fda_drugs.approved_drugs) > 0
+
+    # -------------------------------------------------------------------
     # CHECK 1: Strong genetic evidence BUT prior trial failures
     # Logic: genetics says target is valid, but trials disagree → contradiction
+    # Suppressed if target is already validated by approved drugs.
     # -------------------------------------------------------------------
     failed_count = len(trials.failed_trials)
-    if (open_targets.genetic_score > GENETIC_CONTRADICTION_THRESHOLD
+    if (not has_approved_drugs
+            and open_targets.genetic_score > GENETIC_CONTRADICTION_THRESHOLD
             and failed_count >= MIN_FAILED_TRIALS_FOR_FLAG):
 
         failure_reasons = [
@@ -268,21 +275,38 @@ def cross_reference(
         is_phase3 = trial.phase and ("3" in trial.phase.upper() or "4" in trial.phase.upper())
 
         if is_phase3:
-            flags.append(CrossReferenceFlag(
-                type=FlagType.CONTRADICTION,
-                severity=FlagSeverity.CRITICAL,
-                message=(
-                    f"CRITICAL: Phase III trial '{trial.nct_id}' terminated for efficacy failure: "
-                    f"'{trial.why_stopped}'. Phase III failure is a class-level event — "
-                    "the target hypothesis was tested at scale and rejected."
-                ),
-                details={
-                    "trial_id": trial.nct_id,
-                    "trial_title": trial.title,
-                    "why_stopped": trial.why_stopped,
-                    "phase": trial.phase,
-                }
-            ))
+            if has_approved_drugs:
+                 flags.append(CrossReferenceFlag(
+                     type=FlagType.SAFETY_FLAG,
+                     severity=FlagSeverity.LOW,
+                     message=(
+                         f"Phase III trial '{trial.nct_id}' terminated for efficacy failure "
+                         f"('{trial.why_stopped}'). Since there are already approved drugs for this target, "
+                         "this likely represents a drug-specific failure rather than a target-class failure."
+                     ),
+                     details={
+                         "trial_id": trial.nct_id,
+                         "trial_title": trial.title,
+                         "why_stopped": trial.why_stopped,
+                         "phase": trial.phase,
+                     }
+                 ))
+            else:
+                 flags.append(CrossReferenceFlag(
+                     type=FlagType.CONTRADICTION,
+                     severity=FlagSeverity.CRITICAL,
+                     message=(
+                         f"CRITICAL: Phase III trial '{trial.nct_id}' terminated for efficacy failure: "
+                         f"'{trial.why_stopped}'. Phase III failure is a class-level event — "
+                         "the target hypothesis was tested at scale and rejected."
+                     ),
+                     details={
+                         "trial_id": trial.nct_id,
+                         "trial_title": trial.title,
+                         "why_stopped": trial.why_stopped,
+                         "phase": trial.phase,
+                     }
+                 ))
         else:
             flags.append(CrossReferenceFlag(
                 type=FlagType.CONTRADICTION,
@@ -313,47 +337,48 @@ def cross_reference(
         t for t in trials.failed_trials if t.nct_id not in already_flagged_trial_ids
     ]
 
-    if len(trials.failed_trials) >= 3:
-        # Escalate to CRITICAL if any Phase III among the failures
-        has_phase3_failure = any(
-            t.phase and ("3" in t.phase.upper() or "4" in t.phase.upper())
-            for t in trials.failed_trials
-        )
-        check8_severity = FlagSeverity.CRITICAL if has_phase3_failure else FlagSeverity.HIGH
-        phase3_note = " Including Phase III failure(s) — this signals a target-biology problem, not a drug-design problem." if has_phase3_failure else ""
-
-        flags.append(CrossReferenceFlag(
-            type=FlagType.CONTRADICTION,
-            severity=check8_severity,
-            message=(
-                f"Repeated target-class failure: {len(trials.failed_trials)} trials "
-                "terminated or withdrawn for this target. When multiple programs fail on "
-                f"the same target, the biology is likely the problem.{phase3_note}"
-            ),
-            details={
-                "failed_trial_count": len(trials.failed_trials),
-                "has_phase3_failure": has_phase3_failure,
-                "failure_reasons": [
-                    t.why_stopped for t in trials.failed_trials if t.why_stopped
-                ][:5],
-            }
-        ))
-    elif unflagged_failures:
-        flags.append(CrossReferenceFlag(
-            type=FlagType.CONTRADICTION,
-            severity=FlagSeverity.MEDIUM,
-            message=(
-                f"{len(trials.failed_trials)} terminated/withdrawn trial(s) found for this target. "
-                f"Reason: '{trials.failed_trials[0].why_stopped or 'not specified'}'. "
-                "Investigate before advancing."
-            ),
-            details={
-                "failed_trial_count": len(trials.failed_trials),
-                "failure_reasons": [
-                    t.why_stopped for t in trials.failed_trials if t.why_stopped
-                ][:3],
-            }
-        ))
+    if not has_approved_drugs:
+        if len(trials.failed_trials) >= 3:
+            # Escalate to CRITICAL if any Phase III among the failures
+            has_phase3_failure = any(
+                t.phase and ("3" in t.phase.upper() or "4" in t.phase.upper())
+                for t in trials.failed_trials
+            )
+            check8_severity = FlagSeverity.CRITICAL if has_phase3_failure else FlagSeverity.HIGH
+            phase3_note = " Including Phase III failure(s) — this signals a target-biology problem, not a drug-design problem." if has_phase3_failure else ""
+    
+            flags.append(CrossReferenceFlag(
+                type=FlagType.CONTRADICTION,
+                severity=check8_severity,
+                message=(
+                    f"Repeated target-class failure: {len(trials.failed_trials)} trials "
+                    "terminated or withdrawn for this target. When multiple programs fail on "
+                    f"the same target, the biology is likely the problem.{phase3_note}"
+                ),
+                details={
+                    "failed_trial_count": len(trials.failed_trials),
+                    "has_phase3_failure": has_phase3_failure,
+                    "failure_reasons": [
+                        t.why_stopped for t in trials.failed_trials if t.why_stopped
+                    ][:5],
+                }
+            ))
+        elif unflagged_failures:
+            flags.append(CrossReferenceFlag(
+                type=FlagType.CONTRADICTION,
+                severity=FlagSeverity.MEDIUM,
+                message=(
+                    f"{len(trials.failed_trials)} terminated/withdrawn trial(s) found for this target. "
+                    f"Reason: '{trials.failed_trials[0].why_stopped or 'not specified'}'. "
+                    "Investigate before advancing."
+                ),
+                details={
+                    "failed_trial_count": len(trials.failed_trials),
+                    "failure_reasons": [
+                        t.why_stopped for t in trials.failed_trials if t.why_stopped
+                    ][:3],
+                }
+            ))
 
     # Sort by severity: CRITICAL > HIGH > MEDIUM > LOW
     severity_order = {

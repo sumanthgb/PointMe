@@ -61,6 +61,7 @@ def _is_serious_condition(disease: str, trials: ClinicalTrialsResult) -> bool:
         "tumor", "glioblastoma", "melanoma", "myeloma",
         "alzheimer", "parkinson", "als", "hiv", "aids",
         "heart failure", "sepsis", "stroke", "fibrosis",
+        "hypercholesterolemia", "cardiovascular", "atherosclerosis",
     ]
     disease_lower = disease.lower()
     return any(kw in disease_lower for kw in serious_keywords)
